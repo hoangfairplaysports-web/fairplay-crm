@@ -209,7 +209,7 @@ function App() {
   return html`
     ${store.mode === 'demo' && html`<${DemoBar} user=${user} profiles=${profiles} onSwitch=${async (id) => setUser(await store.switchUser(id))} onReset=${async () => { await store.resetDemo(); reload(); notify('Đã khôi phục dữ liệu mẫu'); }} />`}
     <header class="topbar">
-      <div class="brand"><span class="logo">FP</span><span>Fairplay <b>CRM</b></span></div>
+      <div class="brand"><img src="assets/logo-mark.png" alt="Fairplay Sports" /><span class="wordmark"><b>FAIRPLAY</b><small>SPORTS · CRM</small></span></div>
       <nav class="tabs">
         ${views.map((v) => html`<a href=${'#/' + v.id} class=${view === v.id ? 'on' : ''} onClick=${(e) => { e.preventDefault(); go(v.id); }}><span class="ic">${v.icon}</span><span>${v.label}</span></a>`)}
       </nav>
@@ -298,8 +298,8 @@ function Login({ onLogin }) {
 
   return html`<div class="login">
     <div class="login-card">
-      <div class="brand big"><span class="logo">FP</span><span>Fairplay <b>CRM</b></span></div>
-      <p class="muted">Quản lý lead & follow-up — Phòng Kinh doanh</p>
+      <img class="brand-logo" src="assets/logo.png" alt="Fairplay Sports" />
+      <p class="muted">CRM Phòng Kinh doanh — lead, giải đấu & chăm sóc khách hàng</p>
       ${store.mode === 'demo'
         ? html`<p class="note">Đang chạy <b>chế độ demo</b>. Chọn một tài khoản để xem thử theo từng vai trò:</p>
             <div class="demo-users">
