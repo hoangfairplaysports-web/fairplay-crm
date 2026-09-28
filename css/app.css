@@ -288,6 +288,19 @@ td.num.good { color: var(--ok); font-weight: 600; }
 .w-date { width: 120px; }
 .lrow > .row { margin-top: 0; flex-wrap: nowrap; }
 
+/* Giải đấu */
+.status-chips { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+.schip { border: 1px solid var(--line); background: #fff; border-radius: 20px; padding: 4px 12px; cursor: pointer; font-size: 12.5px; color: var(--c); font-weight: 500; }
+.schip b { margin-left: 4px; }
+.schip.on { background: var(--c); color: #fff; border-color: var(--c); }
+.pill-select { border: 0; border-radius: 20px; padding: 3px 8px; font-size: 12px; font-weight: 600; color: var(--c); background: color-mix(in srgb, var(--c) 13%, white); cursor: pointer; }
+.table.tourn td { vertical-align: top; }
+.table.tourn select { font-size: 12.5px; padding: 3px 6px; max-width: 150px; }
+.clamp { max-width: 280px; font-size: 12.5px; white-space: pre-wrap; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.clamp.strong { color: #1e3a8a; }
+.nowrap { white-space: nowrap; }
+.addmember { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: #f7faf8; }
+
 /* Mobile */
 @media (max-width: 860px) {
   .hide-sm { display: none; }
@@ -310,6 +323,7 @@ td.num.good { color: var(--ok); font-weight: 600; }
   .table.leads, .table.leads tbody, .table.leads tr, .table.leads td { display: block; width: 100%; }
   .table.leads tr { padding: 10px 12px; border-bottom: 1px solid var(--line); position: relative; }
   .table.leads td { border: 0; padding: 2px 0; }
+  .clamp { max-width: none; }
   .table.leads td[data-l]::before { content: attr(data-l) ': '; color: var(--muted); font-size: 12px; }
   .table.leads td[data-l='Khách hàng']::before { content: none; }
   .table.leads td.chk { position: absolute; right: 12px; top: 10px; width: auto; }

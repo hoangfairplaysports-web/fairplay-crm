@@ -4,6 +4,7 @@ import * as U from './util.js';
 import { Modal, StagePill, FollowBadge, LastTouch, ContactButtons, Select, salesPeople, Section, FollowupInput, InlineText, initials } from './ui.js';
 import { CustomersView, CustomerDrawer, CareView, CareToday, ConvertLeadModal } from './customers.js';
 import { TABLES } from './store.js';
+import { TournamentsView, TournamentModal, EventStatusPill } from './tournaments.js';
 
 let store;
 
@@ -14,6 +15,7 @@ const VIEWS = [
   { id: 'today', label: 'Hôm nay', icon: '☀️' },
   { id: 'list', label: 'Danh sách', icon: '📋' },
   { id: 'pipeline', label: 'Pipeline', icon: '🗂️' },
+  { id: 'tournaments', label: 'Giải đấu', icon: '🏆' },
   { id: 'customers', label: 'Khách hàng', icon: '🏢' },
   { id: 'care', label: 'Chăm sóc', icon: '🎁' },
   { id: 'reports', label: 'Báo cáo', icon: '📊' },
@@ -31,6 +33,7 @@ function App() {
   const [openCustomerId, setOpenCustomerId] = useState(null);
   const [showNew, setShowNew] = useState(false);
   const [convertLead, setConvertLead] = useState(null);
+  const [eventModal, setEventModal] = useState(null);
   const [customers, setCustomers] = useState([]);
   const [contacts, setContacts] = useState([]);
   const [events, setEvents] = useState([]);
@@ -196,6 +199,7 @@ function App() {
     openCustomer: (id) => { setOpenLeadId(null); setOpenCustomerId(id); },
     startNewLead: (init) => setShowNew(init || true),
     startConvert: setConvertLead,
+    openEvent: (x) => setEventModal(x && x.id ? { row: x } : { init: x || {} }),
   };
   ctx.openLead = (id) => { setOpenCustomerId(null); setOpenLeadId(id); };
   const views = VIEWS.filter((v) => !v.admin || isAdmin);
@@ -221,6 +225,7 @@ function App() {
         : view === 'pipeline' ? html`<${PipelineView} ctx=${ctx} />`
         : view === 'reports' ? html`<${ReportsView} ctx=${ctx} />`
         : view === 'customers' ? html`<${CustomersView} ctx=${ctx} />`
+        : view === 'tournaments' ? html`<${TournamentsView} ctx=${ctx} />`
         : view === 'care' ? html`<${CareView} ctx=${ctx} />`
         : view === 'settings' && isAdmin ? html`<${SettingsView} ctx=${ctx} />`
         : html`<${TodayView} ctx=${ctx} />`}
@@ -229,6 +234,7 @@ function App() {
     ${openCustomer && html`<${CustomerDrawer} ctx=${ctx} customer=${openCustomer} onClose=${() => setOpenCustomerId(null)} key=${openCustomer.id} />`}
     ${showNew && html`<${NewLeadModal} ctx=${ctx} initial=${showNew === true ? null : showNew} onClose=${() => setShowNew(false)} />`}
     ${convertLead && html`<${ConvertLeadModal} ctx=${ctx} lead=${convertLead} onClose=${() => setConvertLead(null)} />`}
+    ${eventModal && html`<${TournamentModal} ctx=${ctx} row=${eventModal.row && events.find((e) => e.id === eventModal.row.id)} init=${eventModal.init} onClose=${() => setEventModal(null)} />`}
     ${showPw && html`<${PasswordModal} onClose=${() => setShowPw(false)} notify=${notify} />`}
     ${toast && html`<div class=${'toast ' + toast.type} key=${toast.k}>${toast.msg}</div>`}
   `;
@@ -701,6 +707,8 @@ function LeadDrawer({ ctx, lead, onClose }) {
         ${dups.length > 0 && html`<div class="dupwarn">⚠ Có thể trùng với: ${dups.slice(0, 3).map((d) => html`<button class="link" onClick=${() => openLead(d.id)}>${d.name}${d.company ? ' (' + d.company + ')' : ''}</button> `)}</div>`}
         ${lead.stage === 'won' && !lead.customer_id && html`<div class="suggest">🎉 Lead đã chốt nhưng chưa lưu vào <b>Khách hàng</b> — lưu để theo dõi giải, chăm sóc & tặng quà về sau. <button class="btn sm" onClick=${() => startConvert(lead)}>Lưu vào khách hàng</button></div>`}
         ${cus && html`<div class="note">🏢 Thuộc khách hàng <button class="link" onClick=${() => openCustomer(cus.id)}>${cus.name}</button></div>`}
+        ${ctx.events.filter((e) => e.lead_id === lead.id).map((e) => html`<div class="mini click" key=${e.id} onClick=${() => ctx.openEvent(e)}><div class="mini-main">🏆 <b>${e.name}</b> <span class="muted small">${U.eventWhen(e)}</span>${e.next_action && html`<div class="small">➡ ${e.next_action}</div>`}</div><${EventStatusPill} status=${e.status} /></div>`)}
+        ${['quoted', 'negotiating'].includes(lead.stage) && !ctx.events.some((e) => e.lead_id === lead.id) && html`<div class="suggest">🏆 Đang báo giá / đàm phán — tạo <b>giải đấu</b> để theo dõi như sheet "DS Giải đấu". <button class="btn sm" onClick=${() => ctx.openEvent({ lead })}>Tạo giải đấu</button></div>`}
         <${ContactButtons} ctx=${ctx} lead=${lead} onLogged=${startLog} />
 
         <form class="logbox" onSubmit=${submit}>
@@ -907,6 +915,17 @@ function SettingsView({ ctx }) {
       notify(e.message, 'err');
     }
   }
+  async function resetPw(p) {
+    const pw = prompt(`Mật khẩu tạm mới cho ${p.full_name} (tối thiểu 8 ký tự):`, genPassword());
+    if (!pw) return;
+    try {
+      await store.adminUser({ action: 'reset_password', user_id: p.id, password: pw });
+      notify(`Đã đặt lại mật khẩu cho ${p.full_name} — gửi mật khẩu tạm cho họ`);
+    } catch (e) {
+      notify(e.message, 'err');
+    }
+  }
+
   async function saveSettings() {
     try {
       const num = (v, d) => Math.max(1, parseInt(v, 10) || d);
@@ -928,19 +947,16 @@ function SettingsView({ ctx }) {
       <h2>Thành viên & phân quyền</h2>
       <p class="muted small"><b>Admin</b>: toàn quyền, cài đặt. <b>Trưởng KD</b>: giao lead, xoá lead, xem báo cáo đội. <b>Sale</b>: xem/sửa mọi lead, ghi tương tác; lead do sale tạo vào hàng chờ.</p>
       <div class="table-wrap"><table class="table compact">
-        <thead><tr><th>Họ tên</th><th>Email</th><th>Vai trò</th><th>Hoạt động</th></tr></thead>
+        <thead><tr><th>Họ tên</th><th>Email</th><th>Vai trò</th><th>Hoạt động</th><th></th></tr></thead>
         <tbody>${profiles.map((p) => html`<tr key=${p.id}>
           <td><${InlineText} value=${p.full_name} onSave=${(v) => saveProfile(p, { full_name: v })} /></td>
           <td class="small">${p.email}</td>
           <td><${Select} value=${p.role} onChange=${(v) => saveProfile(p, { role: v })} options=${Object.entries(U.ROLES).map(([value, label]) => ({ value, label }))} /></td>
           <td><input type="checkbox" checked=${p.active} onChange=${(e) => saveProfile(p, { active: e.target.checked })} /></td>
+          <td>${p.id !== user.id && html`<button class="link small" onClick=${() => resetPw(p)}>Đặt lại mật khẩu</button>`}</td>
         </tr>`)}</tbody>
       </table></div>
-      ${store.mode === 'demo' ? html`<${AddDemoMember} ctx=${ctx} />` : html`<details class="howto"><summary>Cách thêm thành viên mới</summary>
-        <ol><li>Vào Supabase → <b>Authentication → Users → Add user → Create new user</b>.</li>
-        <li>Nhập email + mật khẩu tạm, tick <b>Auto Confirm User</b>.</li>
-        <li>Quay lại trang này (tải lại), đặt họ tên & vai trò cho người đó. Mặc định là Sale.</li>
-        <li>Gửi email + mật khẩu tạm cho nhân viên; họ tự đổi mật khẩu trong menu tài khoản.</li></ol></details>`}
+      <${AddMember} ctx=${ctx} />
     </section>
 
     <section class="section card-sec">
@@ -998,15 +1014,46 @@ function SettingsView({ ctx }) {
   </div>`;
 }
 
-function AddDemoMember({ ctx }) {
-  const [n, setN] = useState('');
-  const add = async () => {
-    if (!n.trim()) return;
-    const p = await store.addProfile({ full_name: n.trim(), email: U.fold(n).replace(/\s+/g, '.') + '@demo.fairplay', role: 'sales' });
-    ctx.setProfiles((ps) => [...ps, p]);
-    setN('');
-  };
-  return html`<div class="row"><input placeholder="Tên thành viên demo" value=${n} onInput=${(e) => setN(e.target.value)} /><button class="btn" onClick=${add}>Thêm</button></div>`;
+const genPassword = () => {
+  const c = 'abcdefghjkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  const a = crypto.getRandomValues(new Uint32Array(10));
+  return 'Fp-' + [...a].map((x) => c[x % c.length]).join('');
+};
+
+function AddMember({ ctx }) {
+  const { setProfiles, notify } = ctx;
+  const [open, setOpen] = useState(false);
+  const [d, setD] = useState({ full_name: '', email: '', role: 'sales', password: genPassword() });
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(null);
+  const set = (k) => (v) => setD((x) => ({ ...x, [k]: typeof v === 'string' ? v : v.target.value }));
+  async function submit(e) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      const { profile } = await store.adminUser({ action: 'create', ...d, email: d.email.trim() });
+      setProfiles((ps) => [...ps.filter((p) => p.id !== profile.id), profile]);
+      setDone({ ...d });
+      setD({ full_name: '', email: '', role: 'sales', password: genPassword() });
+      notify('Đã tạo tài khoản');
+    } catch (err) {
+      notify(err.message, 'err');
+    }
+    setBusy(false);
+  }
+  if (!open) return html`<div class="row"><button class="btn primary" onClick=${() => setOpen(true)}>＋ Thêm nhân viên</button></div>`;
+  return html`<form class="form addmember" onSubmit=${submit}>
+    <div class="grid2">
+      <label>Họ tên *<input required value=${d.full_name} onInput=${set('full_name')} placeholder="VD: Nguyễn Văn Minh" /></label>
+      <label>Email đăng nhập *<input required type="email" value=${d.email} onInput=${set('email')} /></label>
+      <label>Vai trò<${Select} value=${d.role} onChange=${set('role')} options=${Object.entries(U.ROLES).map(([value, label]) => ({ value, label }))} /></label>
+      <label>Mật khẩu tạm *<input required minlength="8" value=${d.password} onInput=${set('password')} /></label>
+    </div>
+    <div class="row end"><button type="button" class="btn" onClick=${() => { setOpen(false); setDone(null); }}>Đóng</button><button class="btn primary" disabled=${busy}>${busy ? 'Đang tạo…' : 'Tạo tài khoản'}</button></div>
+    ${done && html`<div class="note">✅ Đã tạo tài khoản cho <b>${done.full_name}</b>. Gửi cho nhân viên:<br />
+      Link: <code>${location.origin + location.pathname}</code><br />Email: <code>${done.email}</code> · Mật khẩu tạm: <code>${done.password}</code><br />
+      <small>Nhân viên nên đổi mật khẩu sau lần đăng nhập đầu (menu avatar → Đổi mật khẩu).</small></div>`}
+  </form>`;
 }
 
 function ImportSection({ ctx }) {
@@ -1044,7 +1091,8 @@ function ImportSection({ ctx }) {
     }
   }
   const unmatched = data
-    ? [...new Set([...data.leads.filter((r) => r._assignee && !r.assignee_id).map((r) => r._assignee), ...data.customers.filter((c) => c.owner_name && !byName[U.fold(c.owner_name)]).map((c) => c.owner_name)])]
+    ? [...new Set([...data.leads.filter((r) => r._assignee && !r.assignee_id).map((r) => r._assignee), ...data.customers.filter((c) => c.owner_name && !byName[U.fold(c.owner_name)]).map((c) => c.owner_name),
+        ...data.customers.flatMap((c) => c.events || []).filter((e) => e.pic_name && !byName[U.fold(e.pic_name)]).map((e) => e.pic_name)])]
     : [];
 
   async function run() {
@@ -1058,7 +1106,7 @@ function ImportSection({ ctx }) {
         const row = await store.insert('customers', { ...fields, owner_id: byName[U.fold(owner_name)] || null, last_care_at: iso(c.last_care_at) });
         cusId[U.fold(c.name)] = row.id;
         for (const k of contacts) { await store.insert('contacts', { ...k, customer_id: row.id }); nk++; }
-        for (const ev of events) { await store.insert('events', { ...ev, customer_id: row.id }); ne++; }
+        for (const { pic_name, ...ev } of events) { await store.insert('events', { ...ev, pic_id: byName[U.fold(pic_name)] || null, customer_id: row.id }); ne++; }
       }
       setProgress('Đang nhập lead…');
       const n = await store.importLeads(data.leads.map(({ _assignee, _customer, ...r }) => ({ ...r, customer_id: cusId[U.fold(_customer)] || null })));

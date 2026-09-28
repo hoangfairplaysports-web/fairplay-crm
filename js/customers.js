@@ -1,6 +1,7 @@
 import { html, useState, useEffect, useMemo, useRef } from 'https://cdn.jsdelivr.net/npm/htm@3.1.1/preact/standalone.module.js';
 import * as U from './util.js';
 import { Modal, Select, salesPeople, Section, FollowupInput, CARE_CHIPS, ContactButtons, StagePill } from './ui.js';
+import { EventStatusPill, saveEvent } from './tournaments.js';
 
 // ---------------------------------------------------------------------------
 // Thành phần nhỏ
@@ -54,7 +55,7 @@ export function CustomersView({ ctx }) {
     const fq = U.fold(q);
     return customers
       .map((c) => {
-        const evs = eventsOf(ctx, c.id).filter((e) => e.status !== 'cancelled');
+        const evs = eventsOf(ctx, c.id).filter((e) => U.WON_EVENT.has(e.status));
         const pc = primaryContact(ctx, c.id);
         return { c, evs, n: evs.length, pc, tier: U.customerTier(evs.length, settings).id, f: U.customerFlags(c, settings) };
       })
@@ -143,7 +144,7 @@ export function CustomerDrawer({ ctx, customer: c, onClose }) {
 
   const ks = contactsOf(ctx, c.id);
   const evs = eventsOf(ctx, c.id);
-  const n = evs.filter((e) => e.status !== 'cancelled').length;
+  const n = evs.filter((e) => U.WON_EVENT.has(e.status)).length;
   const cLeads = leads.filter((l) => l.customer_id === c.id);
   const cGifts = gifts.filter((g) => g.customer_id === c.id).sort((a, b) => (b.gift_date || b.created_at).localeCompare(a.gift_date || a.created_at));
   const sug = U.careSuggestions({ ...ctx, customers: [c] });
@@ -204,11 +205,12 @@ export function CustomerDrawer({ ctx, customer: c, onClose }) {
           <${ContactButtons} ctx=${ctx} lead=${asLead(k, c)} compact />
         </div>`)}</div>`}
 
-        <div class="section-head"><h3>Giải đã tổ chức (${n})</h3><button class="link" onClick=${() => setModal({ t: 'event' })}>＋ Thêm giải</button></div>
-        ${evs.length === 0 ? html`<div class="empty">Chưa có giải nào</div>` : html`<div class="minilist">${evs.map((e) => html`<div class="mini click" key=${e.id} onClick=${() => setModal({ t: 'event', row: e })}>
+        <div class="section-head"><h3>Giải đấu (${evs.length}) · đã làm ${n}</h3><button class="link" onClick=${() => ctx.openEvent({ customer_id: c.id })}>＋ Thêm giải</button></div>
+        ${evs.length === 0 ? html`<div class="empty">Chưa có giải nào</div>` : html`<div class="minilist">${evs.map((e) => html`<div class="mini click" key=${e.id} onClick=${() => ctx.openEvent(e)}>
           <div class="mini-main"><b>${e.name}</b>
-            <div class="muted small">${[U.fmtDate(e.event_date), e.sport, e.headcount && e.headcount + ' người', e.venue].filter(Boolean).join(' · ')}</div></div>
-          <span class=${'badge ' + (e.status === 'done' ? 'ok' : e.status === 'upcoming' ? 'info' : '')}>${U.EVENT_STATUS[e.status]}</span>
+            <div class="muted small">${[U.eventWhen(e), e.sport, e.headcount && e.headcount + ' người', ctx.people[e.pic_id]?.full_name].filter(Boolean).join(' · ')}</div>
+            ${e.next_action && U.ACTIVE_EVENT.has(e.status) && html`<div class="small">➡ ${e.next_action}</div>`}</div>
+          <${EventStatusPill} status=${e.status} />
         </div>`)}</div>`}
 
         <div class="section-head"><h3>Cơ hội / Lead (${cLeads.length})</h3><button class="link" onClick=${() => startNewLead(newLeadFor(ctx, c))}>＋ Cơ hội mới</button></div>
@@ -242,7 +244,6 @@ export function CustomerDrawer({ ctx, customer: c, onClose }) {
       </div>
     </aside>
     ${modal?.t === 'contact' && html`<${ContactModal} ctx=${ctx} customer=${c} row=${modal.row} onClose=${() => setModal(null)} />`}
-    ${modal?.t === 'event' && html`<${EventModal} ctx=${ctx} customer=${c} row=${modal.row} onClose=${() => setModal(null)} />`}
     ${modal?.t === 'gift' && html`<${GiftModal} ctx=${ctx} customer=${c} row=${modal.row} preset=${modal.preset} onClose=${() => setModal(null)} />`}
     ${modal?.t === 'customer' && html`<${CustomerModal} ctx=${ctx} row=${c} onClose=${() => setModal(null)} />`}
   </div>`;
@@ -359,30 +360,6 @@ function ContactModal({ ctx, customer, row, onClose }) {
   <//>`;
 }
 
-function EventModal({ ctx, customer, row, onClose, lead }) {
-  const { settings, saveRow, removeRow, isMgr, notify, store } = ctx;
-  const [d, set] = useForm({ name: '', sport: '', event_date: '', venue: '', headcount: '', status: 'done', notes: '', ...row });
-  return html`<${FormModal} title=${(row ? 'Sửa giải' : 'Thêm giải') + ' · ' + customer.name} onClose=${onClose}
-    onDelete=${row && isMgr ? async () => { await removeRow('events', row.id); notify('Đã xoá'); } : null}
-    onSubmit=${async () => {
-      if (!d.name.trim()) throw new Error('Nhập tên giải');
-      const { id, created_at, created_by, ...data } = d;
-      await saveRow('events', row?.id, { ...data, customer_id: customer.id, name: d.name.trim(), event_date: d.event_date || null });
-      if (!row) await store.addActivity({ customer_id: customer.id, type: 'note', content: `Ghi nhận giải: ${d.name.trim()}${d.event_date ? ' (' + U.fmtDate(d.event_date) + ')' : ''}` });
-      notify('Đã lưu giải');
-    }}>
-    <label>Tên giải *<input value=${d.name} onInput=${set('name')} autofocus placeholder="VD: Giải Pickleball Ngân hàng X 2026" /></label>
-    <div class="grid2">
-      <label>Bộ môn<${Select} value=${d.sport} onChange=${set('sport')} placeholder="Chọn" options=${settings.needs} /></label>
-      <label>Ngày tổ chức<input type="date" value=${d.event_date || ''} onInput=${set('event_date')} /></label>
-      <label>Trạng thái<${Select} value=${d.status} onChange=${set('status')} options=${Object.entries(U.EVENT_STATUS).map(([value, label]) => ({ value, label }))} /></label>
-      <label>Quy mô (VĐV)<input type="number" min="0" value=${d.headcount ?? ''} onInput=${set('headcount')} /></label>
-    </div>
-    <label>Địa điểm<input value=${d.venue || ''} onInput=${set('venue')} /></label>
-    <label>Ghi chú<textarea rows="2" value=${d.notes || ''} onInput=${set('notes')} placeholder="Điểm khách hài lòng / chưa hài lòng, bài học…" /></label>
-  <//>`;
-}
-
 export function GiftModal({ ctx, customer, row, preset = {}, onClose }) {
   const { settings, saveRow, removeRow, isMgr, notify, store } = ctx;
   const ks = contactsOf(ctx, customer.id);
@@ -422,14 +399,15 @@ function parseViDate(s) {
 
 export function ConvertLeadModal({ ctx, lead, onClose }) {
   const { customers, settings, saveRow, updateLead, notify, store, openCustomer } = ctx;
-  const guess = lead.customer_id || customers.find((c) => lead.company && U.fold(c.name) === U.fold(lead.company))?.id || '';
+  const guess = lead.customer_id || ctx.events.find((e) => e.lead_id === lead.id)?.customer_id || customers.find((c) => lead.company && U.fold(c.name) === U.fold(lead.company))?.id || '';
   const date = parseViDate(lead.event_time);
+  const linked = ctx.events.find((e) => e.lead_id === lead.id);
   const [d, set] = useForm({
     mode: guess ? 'existing' : 'new', customer_id: guess, name: lead.company || lead.name, customer_type: lead.customer_type || '', region: lead.region || '',
     addContact: !ctx.contacts.some((k) => k.customer_id === guess && ((lead.phone && U.normalizePhone(k.phone) === U.normalizePhone(lead.phone)) || U.fold(k.name) === U.fold(lead.name))),
     k_title: '',
-    addEvent: true, e_name: `Giải ${lead.need || ''} ${lead.company || lead.name}`.replace(/\s+/g, ' ').trim(), e_date: date,
-    e_status: date && date < U.todayStr() ? 'done' : 'upcoming', e_headcount: lead.headcount || '',
+    addEvent: !linked, updateLinked: !!linked, e_name: `Giải ${lead.need || ''} ${lead.company || lead.name}`.replace(/\s+/g, ' ').trim(), e_date: date,
+    e_status: date && date < U.todayStr() ? 'completed' : 'in_progress', e_headcount: lead.headcount || '',
   });
   return html`<${FormModal} title=${`🎉 Chốt "${lead.name}" — lưu vào khách hàng`} onClose=${onClose} wide
     onSubmit=${async () => {
@@ -445,8 +423,9 @@ export function ConvertLeadModal({ ctx, lead, onClose }) {
       if (lead.customer_id !== c.id) await updateLead(lead, { customer_id: c.id });
       if (d.addContact)
         await saveRow('contacts', null, { customer_id: c.id, name: lead.name, title: d.k_title, phone: lead.phone, email: lead.email, facebook: lead.facebook, is_primary: !ctx.contacts.some((k) => k.customer_id === c.id && k.is_primary) });
+      if (linked && d.updateLinked && !U.WON_EVENT.has(linked.status)) await saveEvent(ctx, linked, { status: 'in_progress', customer_id: c.id });
       if (d.addEvent && d.e_name.trim())
-        await saveRow('events', null, { customer_id: c.id, lead_id: lead.id, name: d.e_name.trim(), sport: lead.need, event_date: d.e_date || null, status: d.e_status, headcount: d.e_headcount });
+        await saveEvent(ctx, null, { customer_id: c.id, lead_id: lead.id, name: d.e_name.trim(), sport: lead.need, event_date: d.e_date || null, status: d.e_status, phase: d.e_status === 'completed' ? 'done' : 'before', pic_id: lead.assignee_id, headcount: d.e_headcount });
       await store.addActivity({ customer_id: c.id, type: 'note', content: `Chốt lead "${lead.name}"${d.addEvent ? ' – ' + d.e_name : ''}` });
       notify('Đã lưu vào khách hàng');
       openCustomer(c.id);
@@ -464,7 +443,8 @@ export function ConvertLeadModal({ ctx, lead, onClose }) {
         </div>`}
     <label class="inline-check"><input type="checkbox" checked=${d.addContact} onChange=${set('addContact')} /> Lưu <b>${lead.name}</b> làm đầu mối</label>
     ${d.addContact && html`<label>Chức vụ đầu mối<input value=${d.k_title} onInput=${set('k_title')} placeholder="Trưởng phòng HCNS…" /></label>`}
-    <label class="inline-check"><input type="checkbox" checked=${d.addEvent} onChange=${set('addEvent')} /> Ghi nhận giải đấu</label>
+    ${linked && html`<label class="inline-check"><input type="checkbox" checked=${d.updateLinked} onChange=${set('updateLinked')} /> Chuyển giải <b>${linked.name}</b> sang "Đang thực hiện"</label>`}
+    <label class="inline-check"><input type="checkbox" checked=${d.addEvent} onChange=${set('addEvent')} /> ${linked ? 'Tạo thêm giải khác' : 'Ghi nhận giải đấu'}</label>
     ${d.addEvent && html`<div class="grid2">
       <label>Tên giải<input value=${d.e_name} onInput=${set('e_name')} /></label>
       <label>Ngày tổ chức<input type="date" value=${d.e_date} onInput=${set('e_date')} /></label>

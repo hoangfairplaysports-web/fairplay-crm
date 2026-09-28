@@ -96,7 +96,10 @@ CUSTOMER_MAP = {
     'rox - diễn châu, nghệ an': 'ROX', 'rox - hà nội': 'ROX',
     'pickleball tranh cúp nhân tài': 'Nhân Tài Việt',
 }
-WON = {'Đã hoàn thành', 'Đang thực hiện'}
+STATUS = {'Đang đàm phán': 'negotiating', 'Chưa bắt đầu': 'not_started', 'Đang thực hiện': 'in_progress',
+          'Bị chặn': 'blocked', 'Đã hoàn thành': 'completed'}
+PHASE = {'Trước sự kiện': 'before', 'Ngày': 'eventday', 'Đang diễn ra': 'ongoing', 'Sau sự kiện': 'after', 'Hoàn thành': 'done'}
+WON = {'in_progress', 'completed'}
 
 
 def canonical(name):
@@ -111,58 +114,51 @@ def parse_date(v):
 
 
 def deals(ws):
-    """Trả về (customers, leads): giải đã làm → khách hàng + giải; deal chưa chốt → lead."""
-    stage_map = {'Đang đàm phán': 'negotiating', 'Chưa bắt đầu': 'consulting', 'Bị chặn': 'negotiating'}
-    customers, leads = {}, []
-    today = dt.date.today().isoformat()
-    rows = [r for r in ws.iter_rows(min_row=3, values_only=True) if txt(r[0])]
-    for r in rows:
+    """Mỗi dòng "DS Giải đấu" → 1 giải đấu (giữ nguyên trạng thái, giai đoạn, PIC, ghi chú, phương án), gộp theo khách hàng."""
+    customers = {}
+    for r in ws.iter_rows(min_row=3, values_only=True):
         name, status, owner, phase, pic, due, sport, note, plan, extra = (list(r) + [None] * 10)[:10]
-        name, status = txt(name), fix_d(txt(status))
-        notes = []
-        for label, v in (('Ghi chú', note), ('Phương án', plan), ('Khác', extra)):
-            v = txt(v) if not isinstance(v, dt.datetime) else v.strftime('%d/%m/%Y')
-            if v:
-                notes.append(f'{label}: {v}')
-        cname = canonical(name)
-        if status in WON:
-            d = parse_date(due)
-            if not d and txt(due):
-                notes.insert(0, f'Thời gian: {txt(due)}')
-            c = customers.setdefault(cname, {'name': cname, 'customer_type': 'Doanh nghiệp', 'owner_name': '', 'notes': '[Nhập từ Excel cũ]', 'contacts': [], 'events': []})
-            if txt(pic) or txt(owner):
-                c['owner_name'] = txt(pic) or txt(owner)
-            c['events'].append({'name': name, 'sport': need_of(sport), 'event_date': d or None,
-                                'status': 'upcoming' if d and d > today else 'done', 'notes': '\n'.join(notes)})
+        name = txt(name)
+        if not name:
             continue
-        if status == 'Bị chặn':
-            notes.insert(0, '⚠ Trạng thái cũ: Bị chặn / tạm dừng')
-        notes.append('[Nhập từ Excel cũ – sheet DS Giải đấu]')
-        leads.append({
-            'name': name, 'company': cname, 'customer_type': 'Doanh nghiệp', 'source': 'Khác', 'need': need_of(sport),
-            'event_time': due.strftime('%d/%m/%Y') if isinstance(due, dt.datetime) else txt(due),
-            'stage': stage_map.get(status, 'consulting'), 'assignee_name': txt(pic) or txt(owner),
-            'notes': '\n'.join(notes), 'customer_name': cname,
+        st = STATUS.get(fix_d(txt(status)), 'negotiating')
+        d = parse_date(due)
+        extra_s = txt(extra) if not isinstance(extra, dt.datetime) else extra.strftime('%d/%m/%Y')
+        link = extra_s if extra_s.startswith('http') else (re.search(r'https?://\S+', extra_s).group(0) if 'http' in extra_s else '')
+        plan_s = plan.strftime('%d/%m/%Y') if isinstance(plan, dt.datetime) else txt(plan)
+        notes = txt(note)
+        if extra_s and extra_s != link:
+            notes = (notes + '\n' + extra_s).strip()
+        cname = canonical(name)
+        c = customers.setdefault(cname, {'name': cname, 'customer_type': 'Doanh nghiệp', 'owner_name': '', 'notes': '[Nhập từ Excel cũ]', 'contacts': [], 'events': []})
+        who = txt(pic) or txt(owner)
+        if who and (st in WON or not c['owner_name']):
+            c['owner_name'] = who
+        c['events'].append({
+            'name': name, 'status': st, 'phase': PHASE.get(txt(phase)), 'pic_name': who, 'sport': need_of(sport),
+            'event_date': d or None, 'date_text': '' if isinstance(due, dt.datetime) else txt(due),
+            'notes': notes, 'next_action': plan_s, 'link': link,
         })
     for c in customers.values():
-        dates = sorted(e['event_date'] for e in c['events'] if e['event_date'])
+        dates = sorted(e['event_date'] for e in c['events'] if e['event_date'] and e['status'] in WON)
         if dates:
             c['last_care_at'] = dates[-1] + 'T09:00:00'
-    for l in leads:
-        if l['customer_name'] not in customers:
-            l['customer_name'] = ''
-    return list(customers.values()), leads
+    return list(customers.values())
 
 
 def main(src, dst):
     wb = openpyxl.load_workbook(src, data_only=True)
-    customers, deal_leads = deals(wb['DS Giải đấu'])
-    leads = fb_leads(wb['DS KH ads FB']) + deal_leads
+    customers = deals(wb['DS Giải đấu'])
+    leads = fb_leads(wb['DS KH ads FB'])
     with open(dst, 'w', encoding='utf-8') as f:
         json.dump({'customers': customers, 'leads': leads}, f, ensure_ascii=False, indent=1)
-    names = sorted({r['assignee_name'] for r in leads if r.get('assignee_name')} | {c['owner_name'] for c in customers if c['owner_name']})
-    print(f'Đã xuất {len(customers)} khách hàng ({sum(len(c["events"]) for c in customers)} giải) + {len(leads)} lead → {dst}')
-    for c in sorted(customers, key=lambda c: -len(c['events'])):
+    names = sorted({r['assignee_name'] for r in leads if r.get('assignee_name')} | {c['owner_name'] for c in customers if c['owner_name']}
+                   | {e['pic_name'] for c in customers for e in c['events'] if e['pic_name']})
+    evs = [e for c in customers for e in c['events']]
+    print(f'Đã xuất {len(customers)} khách hàng, {len(evs)} giải đấu, {len(leads)} lead → {dst}')
+    from collections import Counter
+    print('Trạng thái giải:', dict(Counter(e['status'] for e in evs)))
+    for c in sorted(customers, key=lambda c: -len(c['events']))[:8]:
         print(f'  {c["name"]}: {len(c["events"])} giải · phụ trách: {c["owner_name"] or "—"}')
     print('Tên nhân viên cần khớp trong CRM:', ', '.join(names))
 

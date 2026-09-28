@@ -11,7 +11,7 @@ const FIELDS = {
     'stage', 'lost_reason', 'assignee_id', 'next_followup', 'notes', 'created_at', 'last_activity_at', 'customer_id'],
   customers: ['name', 'customer_type', 'industry', 'region', 'address', 'notes', 'owner_id', 'next_care', 'last_care_at', 'created_at'],
   contacts: ['customer_id', 'name', 'title', 'gender', 'phone', 'email', 'facebook', 'birthday', 'is_primary', 'notes'],
-  events: ['customer_id', 'lead_id', 'name', 'sport', 'event_date', 'venue', 'headcount', 'status', 'notes'],
+  events: ['customer_id', 'lead_id', 'name', 'sport', 'event_date', 'date_text', 'venue', 'headcount', 'status', 'phase', 'pic_id', 'notes', 'next_action', 'link'],
   gifts: ['customer_id', 'contact_id', 'occasion', 'occasion_key', 'gift', 'gift_date', 'status', 'notes'],
 };
 export const TABLES = ['customers', 'contacts', 'events', 'gifts'];
@@ -70,6 +70,17 @@ async function createSupabaseStore() {
     },
     async listProfiles() {
       return chk(await sb.from('profiles').select('*').order('full_name'));
+    },
+    async adminUser(body) {
+      const { data, error } = await sb.functions.invoke('admin-users', { body });
+      if (error) {
+        let msg = error.message;
+        try {
+          msg = (await error.context.json()).error || msg;
+        } catch {}
+        throw new Error(translateError(msg));
+      }
+      return data;
     },
     async updateProfile(id, patch) {
       return chk(await sb.from('profiles').update(patch).eq('id', id).select().single());
@@ -145,7 +156,7 @@ function mergeSettings(s) {
 // ---------------------------------------------------------------------------
 // Demo (dữ liệu mẫu, lưu localStorage của trình duyệt)
 // ---------------------------------------------------------------------------
-const DEMO_KEY = 'fpcrm_demo_v2';
+const DEMO_KEY = 'fpcrm_demo_v3';
 
 function createDemoStore() {
   let db = load() || seed();
@@ -205,6 +216,10 @@ function createDemoStore() {
     async resetPassword() {},
     async listProfiles() {
       return copy(db.profiles);
+    },
+    async adminUser({ action, full_name, email, role }) {
+      if (action !== 'create') return { ok: true };
+      return { profile: await this.addProfile({ full_name, email, role }) };
     },
     async addProfile({ full_name, email, role }) {
       if (me()?.role !== 'admin') throw new Error('Chỉ Admin được thêm thành viên');
@@ -284,7 +299,7 @@ function createDemoStore() {
         r.updated_at = now;
         if (!isMgr()) r.owner_id = me().id;
       }
-      if (table === 'events') r.status = r.status || 'done';
+      if (table === 'events') { r.status = r.status || 'negotiating'; r.updated_at = now; }
       if (table === 'gifts') r.status = r.status || 'planned';
       db[table].push(r);
       save();
@@ -296,7 +311,7 @@ function createDemoStore() {
       const p = clean(table, patch);
       if (table === 'customers' && 'owner_id' in p && p.owner_id !== r.owner_id && !isMgr())
         throw new Error('Chỉ Trưởng KD hoặc Admin được giao người phụ trách khách hàng');
-      Object.assign(r, p, table === 'customers' ? { updated_at: new Date().toISOString() } : {});
+      Object.assign(r, p, ['customers', 'events'].includes(table) ? { updated_at: new Date().toISOString() } : {});
       save();
       return copy(r);
     },
@@ -402,6 +417,9 @@ function seed() {
     C('C3', 'Ngân hàng Demo Xanh', 'Doanh nghiệp', 'Hà Nội', 'minh', 14, 20),
     C('C4', 'Tập đoàn Công nghệ Demo', 'Doanh nghiệp', 'Hà Nội', 'vu', -6, 40),
     C('C5', 'Trường Quốc tế Demo', 'Trường học', 'Hà Nội', 'trang', null, 120),
+    C('C6', 'Công ty CP Logistics Sao Việt', 'Doanh nghiệp', 'Hà Nội', 'hoang', 1, 3),
+    C('C7', 'Hội doanh nhân trẻ Demo', 'Cá nhân / CLB', 'Hà Nội', 'minh', 3, 2),
+    C('C8', 'Công ty Thép Demo', 'Doanh nghiệp', 'Tỉnh khác', 'hieu', 7, 10),
   ];
   const bday = (inDays) => '1988' + addDays(inDays).slice(4);
   const K = (id, customer_id, name, title, gender, i, birthday, is_primary = true) => ({
@@ -417,13 +435,18 @@ function seed() {
     K('K6', 'C4', 'Đinh Thu Trang', 'HR Manager', 'Nữ', 6, null),
     K('K7', 'C5', 'Phạm Hải Nam', 'Phó Hiệu trưởng', 'Nam', 7, null),
   ];
-  const E = (id, customer_id, name, sport, days, headcount, status = 'done', lead_id = null) => ({
-    id, customer_id, lead_id, name, sport, event_date: addDays(days), venue: 'Sân demo', headcount, status, notes: '', created_at: ago(Math.max(0, -days) + 30),
+  const E = (id, customer_id, name, sport, days, headcount, status = 'completed', lead_id = null, x = {}) => ({
+    id, customer_id, lead_id, name, sport, event_date: days == null ? null : addDays(days), date_text: '', venue: 'Sân demo', headcount, status,
+    phase: status === 'completed' ? 'done' : 'before', pic_id: x.pic || null, notes: x.notes || '', next_action: x.next || '', link: '',
+    created_at: ago(Math.max(0, -(days || 0)) + 30), updated_at: ago(2),
   });
   const events = [
     E('E1', 'C1', 'Giải Pickleball An Khang 2025', 'Pickleball', -340, 64),
-    E('E2', 'C1', 'Giải Cầu lông An Khang mở rộng', 'Cầu lông', 22, 96, 'upcoming', 'L8'),
-    E('E3', 'C2', 'Giải Bóng đá Chứng khoán Demo 2026', 'Bóng đá', -8, 150, 'done', 'L14'),
+    E('E2', 'C1', 'Giải Cầu lông An Khang mở rộng', 'Cầu lông', 22, 96, 'in_progress', 'L8', { pic: 'hoang', notes: 'Đã cọc sân, đang book cúp & huy chương', next: 'Chốt danh sách VĐV trước 10/10' }),
+    E('E3', 'C2', 'Giải Bóng đá Chứng khoán Demo 2026', 'Bóng đá', -8, 150, 'completed', 'L14', { pic: 'hoang', notes: 'Đã nghiệm thu, còn 30% chưa thanh toán', next: 'Kế toán đòi nốt 30%' }),
+    E('E10', 'C6', 'Giải Bóng đá Logistics Sao Việt', 'Bóng đá', 40, 120, 'negotiating', 'L1', { pic: 'hoang', notes: 'Đã gửi báo giá & profile, khách đang so sánh 2 đơn vị', next: 'Remind khách thứ 5 tuần này' }),
+    E('E11', 'C7', 'Giải Pickleball Doanh nhân trẻ', 'Pickleball', 70, 128, 'negotiating', 'L13', { pic: 'minh', notes: 'Khách chốt format, chờ duyệt ngân sách', next: 'Gửi lại bản kế hoạch chi tiết' }),
+    E('E12', 'C8', 'Hội thao Thép Demo 2027', 'Hội thao', null, 500, 'blocked', 'L11', { pic: 'hieu', notes: 'Khách đang chờ lãnh đạo chốt ngày', next: 'Hỏi lại sau họp HĐQT' }),
     E('E4', 'C3', 'Hội thao Ngân hàng Xanh 2023', 'Hội thao', -1050, 400),
     E('E5', 'C3', 'Giải Pickleball Ngân hàng Xanh 2024', 'Pickleball', -700, 80),
     E('E6', 'C3', 'Giải Bóng đá Ngân hàng Xanh 2025', 'Bóng đá', -320, 160),
@@ -437,6 +460,9 @@ function seed() {
   ];
   leads.find((l) => l.id === 'L8').customer_id = 'C1';
   leads.find((l) => l.id === 'L14').customer_id = 'C2';
+  leads.find((l) => l.id === 'L1').customer_id = 'C6';
+  leads.find((l) => l.id === 'L13').customer_id = 'C7';
+  leads.find((l) => l.id === 'L11').customer_id = 'C8';
   for (const c of customers)
     activities.push({ id: uid(), lead_id: null, customer_id: c.id, type: 'call', content: 'Gọi hỏi thăm, cập nhật kế hoạch hoạt động nội bộ', created_by: c.owner_id, created_at: c.last_care_at });
   return { profiles, leads, activities, customers, contacts, events, gifts, settings: {}, currentUserId: null };

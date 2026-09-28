@@ -51,11 +51,23 @@ export const DEFAULT_SETTINGS = {
   ],
 };
 
-export const EVENT_STATUS = { upcoming: 'Sắp diễn ra', done: 'Đã tổ chức', cancelled: 'Đã huỷ' };
+// Trạng thái & giai đoạn giải đấu — giống sheet "DS Giải đấu"
+export const EVENT_STATUS = {
+  negotiating: 'Đang đàm phán', not_started: 'Chưa bắt đầu', in_progress: 'Đang thực hiện',
+  blocked: 'Bị chặn', completed: 'Đã hoàn thành', cancelled: 'Đã huỷ',
+};
+export const EVENT_STATUS_COLOR = {
+  negotiating: '#db2777', not_started: '#64748b', in_progress: '#0ea5e9', blocked: '#dc2626', completed: '#16a34a', cancelled: '#9ca3af',
+};
+export const EVENT_PHASE = { before: 'Trước sự kiện', eventday: 'Ngày thi đấu', ongoing: 'Đang diễn ra', after: 'Sau sự kiện', done: 'Hoàn thành' };
+// Giải được tính là "đã làm cùng Fairplay" (để xếp hạng khách, tri ân, mùa giải)
+export const WON_EVENT = new Set(['in_progress', 'completed']);
+export const ACTIVE_EVENT = new Set(['negotiating', 'not_started', 'in_progress', 'blocked']);
+export const eventWhen = (e) => e.date_text || (e.event_date ? fmtDate(e.event_date) : '');
 export const GIFT_STATUS = { planned: 'Đã lên kế hoạch', given: 'Đã tặng', skipped: 'Bỏ qua' };
 export const OCCASION_FOR = { all: 'Tất cả đầu mối chính', female: 'Đầu mối nữ', birthday: 'Theo ngày sinh' };
 
-export const countEvents = (events, customerId) => events.filter((e) => e.customer_id === customerId && e.status !== 'cancelled').length;
+export const countEvents = (events, customerId) => events.filter((e) => e.customer_id === customerId && WON_EVENT.has(e.status)).length;
 
 export function customerTier(n, s) {
   if (n >= s.vip_threshold) return { id: 'vip', label: 'VIP', color: '#7c3aed' };
@@ -91,7 +103,7 @@ export function nextOccurrence(dateStr, graceDays = 7) {
 export function giftTasks({ customers, contacts, events, gifts, settings }, horizonExtra = 0) {
   const t = todayStr();
   const done = new Set(gifts.map((g) => g.occasion_key + '|' + (g.contact_id || g.customer_id)));
-  const active = new Set(events.filter((e) => e.status !== 'cancelled').map((e) => e.customer_id));
+  const active = new Set(events.filter((e) => WON_EVENT.has(e.status)).map((e) => e.customer_id));
   const cus = Object.fromEntries(customers.map((c) => [c.id, c]));
   const out = [];
   for (const o of settings.occasions || []) {
@@ -122,7 +134,8 @@ export function careSuggestions({ customers, events, gifts, leads, settings }) {
   const t = todayStr();
   const giftKeys = new Set(gifts.map((g) => g.customer_id + '|' + g.occasion_key));
   const byCus = {};
-  for (const e of events) if (e.status !== 'cancelled') (byCus[e.customer_id] ||= []).push(e);
+  const pending = new Set(events.filter((e) => ACTIVE_EVENT.has(e.status) && (e.event_date || '9999') >= t).map((e) => e.customer_id));
+  for (const e of events) if (WON_EVENT.has(e.status)) (byCus[e.customer_id] ||= []).push(e);
   const loyal = [], thanks = [], season = [];
   for (const c of customers) {
     const evs = (byCus[c.id] || []).slice().sort((a, b) => (b.event_date || '').localeCompare(a.event_date || ''));
@@ -131,9 +144,9 @@ export function careSuggestions({ customers, events, gifts, leads, settings }) {
     else if (n >= settings.loyal_threshold && !giftKeys.has(c.id + '|loyal') && !giftKeys.has(c.id + '|vip'))
       loyal.push({ customer: c, n, key: 'loyal', label: 'Tri ân khách thân thiết' });
     for (const e of evs)
-      if (e.status === 'done' && e.event_date && e.event_date <= t && daysBetween(e.event_date, t) <= 21 && !giftKeys.has(c.id + '|thanks-' + e.id))
+      if (e.event_date && e.event_date <= t && daysBetween(e.event_date, t) <= 21 && !giftKeys.has(c.id + '|thanks-' + e.id))
         thanks.push({ customer: c, event: e, key: 'thanks-' + e.id });
-    const hasUpcoming = evs.some((e) => e.status === 'upcoming' && (e.event_date || '9999') >= t);
+    const hasUpcoming = pending.has(c.id);
     const hasOpenLead = leads.some((l) => l.customer_id === c.id && isOpen(l.stage));
     if (!hasUpcoming && !hasOpenLead) {
       for (const e of evs) {
