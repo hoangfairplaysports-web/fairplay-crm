@@ -270,6 +270,24 @@ td.num.good { color: var(--ok); font-weight: 600; }
 .toast.err { background: var(--bad); }
 @keyframes pop { from { opacity: 0; transform: translate(-50%, 10px); } }
 
+
+/* Khách hàng & chăm sóc */
+.btn.sm { padding: 4px 10px; font-size: 12.5px; }
+.suggest { background: #f0f7e6; border: 1px solid #cfe7a8; color: #2f4a10; padding: 8px 12px; border-radius: 8px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.suggest .btn { margin-left: auto; }
+.minilist { display: grid; gap: 6px; }
+.mini { display: flex; gap: 10px; align-items: center; justify-content: space-between; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; background: #fff; }
+.mini.click, .mini-main { cursor: pointer; }
+.mini:hover { border-color: #c5cfcb; }
+.mini-main { flex: 1; min-width: 0; }
+.fs { border: 1px solid var(--line); border-radius: 8px; padding: 8px 12px 12px; margin: 0; }
+.fs legend { font-size: 12.5px; color: var(--muted); padding: 0 4px; }
+.gift-group { margin-bottom: 14px; }
+.gift-head { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; margin: 0 0 6px; }
+.gift-head .count { margin-left: auto; }
+.w-date { width: 120px; }
+.lrow > .row { margin-top: 0; flex-wrap: nowrap; }
+
 /* Mobile */
 @media (max-width: 860px) {
   .hide-sm { display: none; }
@@ -278,7 +296,9 @@ td.num.good { color: var(--ok); font-weight: 600; }
     position: fixed; bottom: 0; left: 0; right: 0; height: 60px; background: var(--brand); z-index: 40;
     justify-content: space-around; box-shadow: 0 -2px 10px rgba(0, 0, 0, .15);
   }
-  .tabs a { flex-direction: column; justify-content: center; gap: 0; font-size: 11px; padding: 0 4px; border-bottom: 0; border-top: 3px solid transparent; }
+  .tabs a { flex-direction: column; justify-content: center; gap: 0; font-size: 10px; padding: 0 2px; border-bottom: 0; border-top: 3px solid transparent; flex: 1; text-align: center; white-space: nowrap; }
+  .lrow > .row { grid-column: 1 / -1; flex-wrap: wrap; }
+  .suggest .btn { margin-left: 0; }
   .tabs a.on { border-top-color: var(--accent); }
   .tabs .ic { font-size: 18px; }
   .brand { flex: 1; }

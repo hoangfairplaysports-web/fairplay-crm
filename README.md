@@ -14,6 +14,8 @@ CRM quản lý lead & follow-up cho Phòng Kinh doanh Fairplay Sports.
 | **Danh sách** | Tìm kiếm (không dấu, theo SĐT), lọc theo giai đoạn / người / nguồn / nhu cầu / tình trạng, giao hàng loạt, xuất CSV |
 | **Pipeline** | Kanban 7 cột, kéo thả để chuyển giai đoạn (bắt buộc hẹn follow-up; Thất bại bắt buộc có lý do) |
 | **Chi tiết lead** | Nút Gọi / Zalo (tự copy tin nhắn mẫu) / Email (mẫu soạn sẵn) / Facebook; ghi tương tác; lịch sử đầy đủ; cảnh báo trùng |
+| **Khách hàng** | Đơn vị đã/đang làm việc: nhiều đầu mối (chức vụ, SĐT, ngày sinh, giới tính), lịch sử giải đã tổ chức, cơ hội mới, quà đã tặng. Hạng tự tính: Tiềm năng → 1 giải → Thân thiết (≥2) → VIP (≥4) |
+| **Chăm sóc & Quà tặng** | Lịch chăm sóc định kỳ, khách lâu không liên hệ, **mùa giải** (năm trước tổ chức tháng này → nhắc trước 90 ngày), tri ân sau giải, tri ân khách thân thiết/VIP, quà Tết / Trung thu / 8-3 / 20-10 / sinh nhật đầu mối — xuất danh sách mua quà |
 | **Báo cáo** | Phễu, tỉ lệ chốt theo nhân viên / nguồn / nhu cầu, lý do thất bại |
 | **Cài đặt** (Admin) | Thành viên & vai trò, số ngày "bỏ quên", danh mục, mẫu email/Zalo, nhập CSV |
 
@@ -23,11 +25,14 @@ CRM quản lý lead & follow-up cho Phòng Kinh doanh Fairplay Sports.
 |---|:-:|:-:|:-:|
 | Xem & sửa mọi lead, ghi tương tác | ✓ | ✓ | ✓ |
 | Tạo lead | ✓ (vào hàng chờ) | ✓ | ✓ |
-| Giao / đổi người phụ trách | | ✓ | ✓ |
-| Xoá lead | | ✓ | ✓ |
+| Tạo khách hàng, đầu mối, giải, ghi quà tặng | ✓ | ✓ | ✓ |
+| Giao / đổi người phụ trách (lead, khách hàng) | | ✓ | ✓ |
+| Xoá lead, khách hàng, giải, quà | | ✓ | ✓ |
 | Cài đặt, thành viên, nhập dữ liệu | | | ✓ |
 
 Quyền được kiểm soát ở tầng cơ sở dữ liệu (Row Level Security), không chỉ ẩn trên giao diện.
+
+**Luồng lead → khách hàng**: lead chuyển sang *Chốt* → app hỏi lưu vào khách hàng (có sẵn hoặc tạo mới), thêm đầu mối và ghi nhận giải. Khách cũ có nhu cầu mới → "＋ Cơ hội mới" trong trang khách hàng; lead này tự giao cho người đang phụ trách khách đó.
 
 ---
 
@@ -54,11 +59,17 @@ Quyền được kiểm soát ở tầng cơ sở dữ liệu (Row Level Securit
 
 ### Bước 4 — Chuyển dữ liệu từ Excel cũ
 ```bash
-python3 tools/convert_excel.py "../Tổng hợp thông tin công việc Fairplay Sports.xlsx" import/leads.csv
+python3 tools/convert_excel.py "../Tổng hợp thông tin công việc Fairplay Sports.xlsx" import/fairplay-import.json
 ```
-Sau đó đăng nhập Admin → **Cài đặt → Nhập dữ liệu từ file CSV** → chọn `import/leads.csv`.
-Tên trong cột `assignee_name` (Hoàng, Minh, Vũ, Trang, Hiếu, Tuấn Minh) phải trùng họ tên thành viên trong CRM để giao đúng người.
-File CSV chứa dữ liệu khách thật và đã được `.gitignore` — không đưa lên GitHub.
+- Giải *Đã hoàn thành / Đang thực hiện* trong sheet "DS Giải đấu" → **khách hàng + giải đã tổ chức** (gộp theo `CUSTOMER_MAP` trong script, VD 3 giải MSB → khách "MSB"; kiểm tra & sửa nếu gộp sai).
+- Deal chưa chốt + lead Facebook → **lead**.
+- File cũ chưa có đầu mối cho khách doanh nghiệp → cần bổ sung sau khi nhập.
+
+Sau đó đăng nhập Admin → **Cài đặt → Nhập dữ liệu** → chọn file `.json`.
+Tên người phụ trách (Hoàng, Minh, Vũ, Trang, Hiếu, Tuấn Minh) phải trùng họ tên thành viên trong CRM để giao đúng người.
+File chứa dữ liệu khách thật và đã được `.gitignore` — không đưa lên GitHub.
+
+> Đã cài Supabase từ phiên bản trước? Chạy lại toàn bộ `supabase/schema.sql` — file viết để chạy lại an toàn, sẽ thêm các bảng mới.
 
 ---
 
@@ -92,11 +103,13 @@ Lưu ý: app ở chế độ Development chỉ nhận lead từ người có vai
 ```
 index.html            trang chính
 css/app.css           giao diện
-js/app.js             màn hình (Preact + htm, không cần build)
+js/app.js             khung app, lead, pipeline, báo cáo, cài đặt (Preact + htm, không cần build)
+js/customers.js       khách hàng, đầu mối, giải, chăm sóc & quà tặng
+js/ui.js              thành phần giao diện dùng chung
 js/store.js           kết nối dữ liệu (Supabase / Demo)
 js/util.js            hằng số, hàm tiện ích
 js/config.js          cấu hình Supabase
 supabase/schema.sql   bảng dữ liệu + phân quyền
 supabase/functions/   webhook Facebook Lead Ads
-tools/convert_excel.py  chuyển Excel cũ → CSV
+tools/convert_excel.py  chuyển Excel cũ → gói JSON
 ```

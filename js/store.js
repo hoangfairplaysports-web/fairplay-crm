@@ -6,17 +6,23 @@ export async function createStore() {
   return createDemoStore();
 }
 
-const LEAD_FIELDS = [
-  'name', 'company', 'customer_type', 'phone', 'email', 'facebook', 'source', 'need', 'region', 'headcount', 'event_time',
-  'stage', 'lost_reason', 'assignee_id', 'next_followup', 'notes', 'created_at', 'last_activity_at',
-];
-function cleanLead(d) {
+const FIELDS = {
+  leads: ['name', 'company', 'customer_type', 'phone', 'email', 'facebook', 'source', 'need', 'region', 'headcount', 'event_time',
+    'stage', 'lost_reason', 'assignee_id', 'next_followup', 'notes', 'created_at', 'last_activity_at', 'customer_id'],
+  customers: ['name', 'customer_type', 'industry', 'region', 'address', 'notes', 'owner_id', 'next_care', 'last_care_at', 'created_at'],
+  contacts: ['customer_id', 'name', 'title', 'gender', 'phone', 'email', 'facebook', 'birthday', 'is_primary', 'notes'],
+  events: ['customer_id', 'lead_id', 'name', 'sport', 'event_date', 'venue', 'headcount', 'status', 'notes'],
+  gifts: ['customer_id', 'contact_id', 'occasion', 'occasion_key', 'gift', 'gift_date', 'status', 'notes'],
+};
+export const TABLES = ['customers', 'contacts', 'events', 'gifts'];
+function clean(table, d) {
   const out = {};
-  for (const k of LEAD_FIELDS) if (k in d) out[k] = d[k] === '' ? null : d[k];
+  for (const k of FIELDS[table]) if (k in d) out[k] = d[k] === '' ? null : d[k];
   if ('phone' in out) out.phone = normalizePhone(out.phone) || null;
   if ('headcount' in out) out.headcount = out.headcount == null ? null : parseInt(out.headcount, 10) || null;
   return out;
 }
+const cleanLead = (d) => clean('leads', d);
 
 function translateError(msg) {
   if (/Invalid login credentials/i.test(msg)) return 'Sai email hoặc mật khẩu';
@@ -86,11 +92,30 @@ async function createSupabaseStore() {
     async deleteLead(id) {
       chk(await sb.from('leads').delete().eq('id', id));
     },
-    async listActivities(leadId) {
-      return chk(await sb.from('activities').select('*').eq('lead_id', leadId).order('created_at', { ascending: false }));
+    async listActivities(filter) {
+      const [k, v] = Object.entries(filter)[0];
+      return chk(await sb.from('activities').select('*').eq(k, v).order('created_at', { ascending: false }));
     },
     async addActivity(a) {
-      return chk(await sb.from('activities').insert({ lead_id: a.lead_id, type: a.type, content: a.content }).select().single());
+      return chk(await sb.from('activities').insert({ lead_id: a.lead_id || null, customer_id: a.customer_id || null, type: a.type, content: a.content }).select().single());
+    },
+    async list(table) {
+      const all = [];
+      for (let from = 0; ; from += 1000) {
+        const rows = chk(await sb.from(table).select('*').order('created_at', { ascending: false }).range(from, from + 999));
+        all.push(...rows);
+        if (rows.length < 1000) break;
+      }
+      return all;
+    },
+    async insert(table, row) {
+      return chk(await sb.from(table).insert(clean(table, row)).select().single());
+    },
+    async update(table, id, patch) {
+      return chk(await sb.from(table).update(clean(table, patch)).eq('id', id).select().single());
+    },
+    async remove(table, id) {
+      chk(await sb.from(table).delete().eq('id', id));
     },
     async getSettings() {
       const s = chk(await sb.from('settings').select('*').eq('id', 1).maybeSingle()) || {};
@@ -120,7 +145,7 @@ function mergeSettings(s) {
 // ---------------------------------------------------------------------------
 // Demo (dữ liệu mẫu, lưu localStorage của trình duyệt)
 // ---------------------------------------------------------------------------
-const DEMO_KEY = 'fpcrm_demo_v1';
+const DEMO_KEY = 'fpcrm_demo_v2';
 
 function createDemoStore() {
   let db = load() || seed();
@@ -206,7 +231,7 @@ function createDemoStore() {
         id: uid(), stage: 'new', created_at: now, last_activity_at: now, ...cleanLead(d),
         created_by: me().id, updated_at: now,
       };
-      if (!isMgr()) lead.assignee_id = null;
+      if (!isMgr()) lead.assignee_id = db.customers.find((c) => c.id === lead.customer_id)?.owner_id || null;
       guard(lead);
       db.leads.push(lead);
       save();
@@ -230,18 +255,60 @@ function createDemoStore() {
       db.activities = db.activities.filter((a) => a.lead_id !== id);
       save();
     },
-    async listActivities(leadId) {
+    async listActivities(filter) {
       need();
-      return copy(db.activities.filter((a) => a.lead_id === leadId)).sort((a, b) => b.created_at.localeCompare(a.created_at));
+      const [k, v] = Object.entries(filter)[0];
+      return copy(db.activities.filter((a) => a[k] === v)).sort((a, b) => b.created_at.localeCompare(a.created_at));
     },
     async addActivity(a) {
       need();
-      const act = { id: uid(), lead_id: a.lead_id, type: a.type, content: a.content, created_by: me().id, created_at: new Date().toISOString() };
+      const act = { id: uid(), lead_id: a.lead_id || null, customer_id: a.customer_id || null, type: a.type, content: a.content, created_by: me().id, created_at: new Date().toISOString() };
       db.activities.push(act);
       const lead = db.leads.find((l) => l.id === a.lead_id);
       if (lead) lead.last_activity_at = act.created_at;
+      const cus = db.customers.find((c) => c.id === a.customer_id);
+      if (cus) cus.last_care_at = act.created_at;
       save();
       return copy(act);
+    },
+    async list(table) {
+      need();
+      return copy(db[table]).sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+    },
+    async insert(table, row) {
+      need();
+      const now = new Date().toISOString();
+      const r = { id: uid(), created_at: now, ...clean(table, row), created_by: me().id };
+      if (table === 'customers') {
+        r.last_care_at = r.last_care_at || now;
+        r.updated_at = now;
+        if (!isMgr()) r.owner_id = me().id;
+      }
+      if (table === 'events') r.status = r.status || 'done';
+      if (table === 'gifts') r.status = r.status || 'planned';
+      db[table].push(r);
+      save();
+      return copy(r);
+    },
+    async update(table, id, patch) {
+      need();
+      const r = db[table].find((x) => x.id === id);
+      const p = clean(table, patch);
+      if (table === 'customers' && 'owner_id' in p && p.owner_id !== r.owner_id && !isMgr())
+        throw new Error('Chỉ Trưởng KD hoặc Admin được giao người phụ trách khách hàng');
+      Object.assign(r, p, table === 'customers' ? { updated_at: new Date().toISOString() } : {});
+      save();
+      return copy(r);
+    },
+    async remove(table, id) {
+      if (!isMgr()) throw new Error('Chỉ Trưởng KD hoặc Admin được xoá');
+      db[table] = db[table].filter((x) => x.id !== id);
+      if (table === 'customers') {
+        for (const t of ['contacts', 'events', 'gifts']) db[t] = db[t].filter((x) => x.customer_id !== id);
+        db.activities = db.activities.filter((a) => a.customer_id !== id);
+        for (const l of db.leads) if (l.customer_id === id) l.customer_id = null;
+      }
+      save();
     },
     async getSettings() {
       return mergeSettings(db.settings);
@@ -324,5 +391,53 @@ function seed() {
         created_by: l.assignee_id || 'minh', created_at: l.last_activity_at,
       });
   }
-  return { profiles, leads, activities, settings: {}, currentUserId: null };
+  // Khách hàng mẫu (hư cấu)
+  const C = (id, name, customer_type, region, owner_id, nextCare, careAgo) => ({
+    id, name, customer_type, region, owner_id, industry: '', address: '', notes: '',
+    next_care: nextCare == null ? null : addDays(nextCare), last_care_at: ago(careAgo), created_at: ago(400), updated_at: ago(careAgo), created_by: owner_id,
+  });
+  const customers = [
+    C('C1', 'Công ty Bảo hiểm An Khang', 'Doanh nghiệp', 'Hà Nội', 'hoang', 5, 5),
+    C('C2', 'Công ty Chứng khoán Demo', 'Doanh nghiệp', 'TP.HCM', 'hoang', null, 8),
+    C('C3', 'Ngân hàng Demo Xanh', 'Doanh nghiệp', 'Hà Nội', 'minh', 14, 20),
+    C('C4', 'Tập đoàn Công nghệ Demo', 'Doanh nghiệp', 'Hà Nội', 'vu', -6, 40),
+    C('C5', 'Trường Quốc tế Demo', 'Trường học', 'Hà Nội', 'trang', null, 120),
+  ];
+  const bday = (inDays) => '1988' + addDays(inDays).slice(4);
+  const K = (id, customer_id, name, title, gender, i, birthday, is_primary = true) => ({
+    id, customer_id, name, title, gender, phone: '091' + String(2000000 + i * 1234567).slice(-7), email: `dauMoi${i}@example.com`.toLowerCase(),
+    facebook: '', birthday, is_primary, notes: '', created_at: ago(300),
+  });
+  const contacts = [
+    K('K1', 'C1', 'Bùi Thanh Hương', 'Trưởng phòng HCNS', 'Nữ', 1, bday(5)),
+    K('K2', 'C1', 'Lê Văn Bình', 'Chủ tịch Công đoàn', 'Nam', 2, null, false),
+    K('K3', 'C2', 'Tạ Thị Hồng', 'Phó phòng Nhân sự', 'Nữ', 3, bday(40)),
+    K('K4', 'C3', 'Trần Quốc Việt', 'Giám đốc Khối Văn hoá', 'Nam', 4, bday(120)),
+    K('K5', 'C3', 'Nguyễn Minh Thư', 'Chuyên viên Công đoàn', 'Nữ', 5, null, false),
+    K('K6', 'C4', 'Đinh Thu Trang', 'HR Manager', 'Nữ', 6, null),
+    K('K7', 'C5', 'Phạm Hải Nam', 'Phó Hiệu trưởng', 'Nam', 7, null),
+  ];
+  const E = (id, customer_id, name, sport, days, headcount, status = 'done', lead_id = null) => ({
+    id, customer_id, lead_id, name, sport, event_date: addDays(days), venue: 'Sân demo', headcount, status, notes: '', created_at: ago(Math.max(0, -days) + 30),
+  });
+  const events = [
+    E('E1', 'C1', 'Giải Pickleball An Khang 2025', 'Pickleball', -340, 64),
+    E('E2', 'C1', 'Giải Cầu lông An Khang mở rộng', 'Cầu lông', 22, 96, 'upcoming', 'L8'),
+    E('E3', 'C2', 'Giải Bóng đá Chứng khoán Demo 2026', 'Bóng đá', -8, 150, 'done', 'L14'),
+    E('E4', 'C3', 'Hội thao Ngân hàng Xanh 2023', 'Hội thao', -1050, 400),
+    E('E5', 'C3', 'Giải Pickleball Ngân hàng Xanh 2024', 'Pickleball', -700, 80),
+    E('E6', 'C3', 'Giải Bóng đá Ngân hàng Xanh 2025', 'Bóng đá', -320, 160),
+    E('E7', 'C3', 'Giải Pickleball mùa xuân 2026', 'Pickleball', -200, 72),
+    E('E8', 'C4', 'Giải Pickleball Công nghệ Demo 2025', 'Pickleball', -300, 48),
+    E('E9', 'C5', 'Giải Bóng đá học sinh 2025', 'Bóng đá', -560, 220),
+  ];
+  const gifts = [
+    { id: 'G1', customer_id: 'C3', contact_id: 'K4', occasion: 'Tết Nguyên Đán', occasion_key: 'tet-2026', gift: 'Hộp quà Tết cao cấp', gift_date: addDays(-230), status: 'given', notes: '', created_at: ago(230), created_by: 'minh' },
+    { id: 'G2', customer_id: 'C3', contact_id: 'K4', occasion: 'Khách thân thiết', occasion_key: 'loyal', gift: 'Vợt Pickleball khắc tên', gift_date: addDays(-600), status: 'given', notes: '', created_at: ago(600), created_by: 'minh' },
+  ];
+  leads.find((l) => l.id === 'L8').customer_id = 'C1';
+  leads.find((l) => l.id === 'L14').customer_id = 'C2';
+  for (const c of customers)
+    activities.push({ id: uid(), lead_id: null, customer_id: c.id, type: 'call', content: 'Gọi hỏi thăm, cập nhật kế hoạch hoạt động nội bộ', created_by: c.owner_id, created_at: c.last_care_at });
+  return { profiles, leads, activities, customers, contacts, events, gifts, settings: {}, currentUserId: null };
 }

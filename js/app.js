@@ -1,6 +1,9 @@
 import { html, render, useState, useEffect, useMemo, useCallback, useRef } from 'https://cdn.jsdelivr.net/npm/htm@3.1.1/preact/standalone.module.js';
 import { createStore } from './store.js';
 import * as U from './util.js';
+import { Modal, StagePill, FollowBadge, LastTouch, ContactButtons, Select, salesPeople, Section, FollowupInput, InlineText, initials } from './ui.js';
+import { CustomersView, CustomerDrawer, CareView, CareToday, ConvertLeadModal } from './customers.js';
+import { TABLES } from './store.js';
 
 let store;
 
@@ -11,6 +14,8 @@ const VIEWS = [
   { id: 'today', label: 'Hôm nay', icon: '☀️' },
   { id: 'list', label: 'Danh sách', icon: '📋' },
   { id: 'pipeline', label: 'Pipeline', icon: '🗂️' },
+  { id: 'customers', label: 'Khách hàng', icon: '🏢' },
+  { id: 'care', label: 'Chăm sóc', icon: '🎁' },
   { id: 'reports', label: 'Báo cáo', icon: '📊' },
   { id: 'settings', label: 'Cài đặt', icon: '⚙️', admin: true },
 ];
@@ -23,7 +28,14 @@ function App() {
   const [view, setView] = useState(() => location.hash.replace('#/', '') || 'today');
   const [listPreset, setListPreset] = useState(null);
   const [openLeadId, setOpenLeadId] = useState(null);
+  const [openCustomerId, setOpenCustomerId] = useState(null);
   const [showNew, setShowNew] = useState(false);
+  const [convertLead, setConvertLead] = useState(null);
+  const [customers, setCustomers] = useState([]);
+  const [contacts, setContacts] = useState([]);
+  const [events, setEvents] = useState([]);
+  const [gifts, setGifts] = useState([]);
+  const setters = { customers: setCustomers, contacts: setContacts, events: setEvents, gifts: setGifts };
   const [showPw, setShowPw] = useState(false);
   const [toast, setToast] = useState(null);
   const lastLoad = useRef(0);
@@ -37,7 +49,8 @@ function App() {
 
   const reload = useCallback(async () => {
     try {
-      const [p, l, s] = await Promise.all([store.listProfiles(), store.listLeads(), store.getSettings()]);
+      const [p, l, s, ...rest] = await Promise.all([store.listProfiles(), store.listLeads(), store.getSettings(), ...TABLES.map((t) => store.list(t))]);
+      TABLES.forEach((t, i) => setters[t](rest[i]));
       setProfiles(p);
       setLeads(l);
       setSettings(s);
@@ -98,7 +111,35 @@ function App() {
     for (const a of logs) await store.addActivity({ lead_id: lead.id, ...a });
     if (logs.length) updated.last_activity_at = new Date().toISOString();
     replaceLead(updated);
+    if (patch.stage === 'won' && lead.stage !== 'won') setConvertLead(updated);
     return updated;
+  }
+
+  async function saveRow(table, id, data) {
+    const row = id ? await store.update(table, id, data) : await store.insert(table, data);
+    setters[table]((xs) => (id ? xs.map((x) => (x.id === id ? row : x)) : [row, ...xs]));
+    return row;
+  }
+
+  async function removeRow(table, id) {
+    await store.remove(table, id);
+    setters[table]((xs) => xs.filter((x) => x.id !== id));
+    if (table === 'customers') {
+      for (const t of ['contacts', 'events', 'gifts']) setters[t]((xs) => xs.filter((x) => x.customer_id !== id));
+      setLeads((ls) => ls.map((l) => (l.customer_id === id ? { ...l, customer_id: null } : l)));
+      setOpenCustomerId(null);
+    }
+  }
+
+  async function logCare(c, { type, content, next_care }) {
+    let cur = c;
+    if ((next_care || null) !== (c.next_care || null)) cur = await saveRow('customers', c.id, { next_care: next_care || null });
+    if (content && content.trim()) {
+      await store.addActivity({ customer_id: c.id, type, content: content.trim() });
+      cur = { ...cur, last_care_at: new Date().toISOString() };
+      setCustomers((xs) => xs.map((x) => (x.id === c.id ? cur : x)));
+    }
+    return cur;
   }
 
   async function logActivity(lead, { type, content, stage, next_followup, lost_reason }) {
@@ -150,10 +191,16 @@ function App() {
   const ctx = {
     user, isMgr, isAdmin, profiles, people, leads: leads || [], settings, notify, go, listPreset,
     openLead: setOpenLeadId, updateLead, logActivity, createLead, bulkAssign, bulkStage, deleteLead, reload,
-    setSettings, setProfiles,
+    setSettings, setProfiles, store,
+    customers, contacts, events, gifts, saveRow, removeRow, logCare,
+    openCustomer: (id) => { setOpenLeadId(null); setOpenCustomerId(id); },
+    startNewLead: (init) => setShowNew(init || true),
+    startConvert: setConvertLead,
   };
+  ctx.openLead = (id) => { setOpenCustomerId(null); setOpenLeadId(id); };
   const views = VIEWS.filter((v) => !v.admin || isAdmin);
   const openLead = leads?.find((l) => l.id === openLeadId);
+  const openCustomer = customers.find((c) => c.id === openCustomerId);
 
   return html`
     ${store.mode === 'demo' && html`<${DemoBar} user=${user} profiles=${profiles} onSwitch=${async (id) => setUser(await store.switchUser(id))} onReset=${async () => { await store.resetDemo(); reload(); notify('Đã khôi phục dữ liệu mẫu'); }} />`}
@@ -173,11 +220,15 @@ function App() {
         : view === 'list' ? html`<${ListView} ctx=${ctx} key=${JSON.stringify(listPreset)} />`
         : view === 'pipeline' ? html`<${PipelineView} ctx=${ctx} />`
         : view === 'reports' ? html`<${ReportsView} ctx=${ctx} />`
+        : view === 'customers' ? html`<${CustomersView} ctx=${ctx} />`
+        : view === 'care' ? html`<${CareView} ctx=${ctx} />`
         : view === 'settings' && isAdmin ? html`<${SettingsView} ctx=${ctx} />`
         : html`<${TodayView} ctx=${ctx} />`}
     </main>
-    ${openLead && html`<${LeadDrawer} ctx=${ctx} lead=${openLead} onClose=${() => setOpenLeadId(null)} />`}
-    ${showNew && html`<${NewLeadModal} ctx=${ctx} onClose=${() => setShowNew(false)} />`}
+    ${openLead && html`<${LeadDrawer} ctx=${ctx} lead=${openLead} onClose=${() => setOpenLeadId(null)} key=${openLead.id} />`}
+    ${openCustomer && html`<${CustomerDrawer} ctx=${ctx} customer=${openCustomer} onClose=${() => setOpenCustomerId(null)} key=${openCustomer.id} />`}
+    ${showNew && html`<${NewLeadModal} ctx=${ctx} initial=${showNew === true ? null : showNew} onClose=${() => setShowNew(false)} />`}
+    ${convertLead && html`<${ConvertLeadModal} ctx=${ctx} lead=${convertLead} onClose=${() => setConvertLead(null)} />`}
     ${showPw && html`<${PasswordModal} onClose=${() => setShowPw(false)} notify=${notify} />`}
     ${toast && html`<div class=${'toast ' + toast.type} key=${toast.k}>${toast.msg}</div>`}
   `;
@@ -204,12 +255,6 @@ function UserMenu({ user, onPw, onLogout }) {
     </div>`}
   </div>`;
 }
-
-const initials = (n) => {
-  const w = String(n || '?').replace(/\(.*?\)/g, '').replace(/[^\p{L}\s]/gu, '').split(/\s+/).filter(Boolean);
-  if (!w.length) return '?';
-  return (w.length > 1 ? w.slice(-2).map((x) => x[0]).join('') : w[0].slice(0, 2)).toUpperCase();
-};
 
 // ---------------------------------------------------------------------------
 // Đăng nhập
@@ -294,69 +339,6 @@ function PasswordModal({ onClose, notify }) {
 // ---------------------------------------------------------------------------
 // Thành phần dùng chung
 // ---------------------------------------------------------------------------
-function Modal({ title, onClose, children, wide }) {
-  useEffect(() => {
-    const k = (e) => e.key === 'Escape' && onClose();
-    addEventListener('keydown', k);
-    return () => removeEventListener('keydown', k);
-  }, []);
-  return html`<div class="overlay" onMouseDown=${(e) => e.target === e.currentTarget && onClose()}>
-    <div class=${'modal' + (wide ? ' wide' : '')} role="dialog" aria-label=${title}>
-      <div class="modal-head"><h3>${title}</h3><button class="x" onClick=${onClose} aria-label="Đóng">×</button></div>
-      <div class="modal-body">${children}</div>
-    </div>
-  </div>`;
-}
-
-const StagePill = ({ stage }) => {
-  const s = U.stageOf(stage);
-  return html`<span class="pill" style=${`--c:${s.color}`}>${s.label}</span>`;
-};
-
-function FollowBadge({ lead, settings }) {
-  const f = U.leadFlags(lead, settings);
-  if (!f.open) return html`<span class="muted">—</span>`;
-  if (!lead.next_followup) return html`<span class="badge warn">Chưa hẹn</span>`;
-  const cls = f.overdue ? 'bad' : f.dueToday ? 'warn' : 'ok';
-  return html`<span class=${'badge ' + cls} title=${U.fmtDate(lead.next_followup)}>${U.relDay(lead.next_followup)}</span>`;
-}
-
-function LastTouch({ lead, settings }) {
-  const d = U.daysSince(lead.last_activity_at);
-  const stale = U.leadFlags(lead, settings).stale;
-  return html`<span class=${stale ? 'stale' : 'muted'} title=${U.fmtDateTime(lead.last_activity_at)}>${d === 0 ? 'Hôm nay' : d + ' ngày trước'}${stale ? ' ⚠' : ''}</span>`;
-}
-
-function ContactButtons({ ctx, lead, onLogged, compact }) {
-  const { settings, user, notify } = ctx;
-  const phone = U.normalizePhone(lead.phone);
-  const act = (type) => onLogged && onLogged(type);
-  async function zalo() {
-    const msg = U.fillTemplate(settings.zalo_template, lead, user);
-    try {
-      await navigator.clipboard.writeText(msg);
-      notify('Đã copy tin nhắn mẫu — dán vào Zalo');
-    } catch {}
-    act('zalo');
-  }
-  return html`<div class=${'contact' + (compact ? ' compact' : '')} onClick=${(e) => e.stopPropagation()}>
-    <a class=${'cbtn' + (phone ? '' : ' dis')} href=${phone ? 'tel:' + phone : undefined} onClick=${() => phone && act('call')} title="Gọi">📞${!compact && ' Gọi'}</a>
-    <a class=${'cbtn' + (phone ? '' : ' dis')} href=${phone ? 'https://zalo.me/' + phone : undefined} target="_blank" rel="noopener" onClick=${() => phone && zalo()} title="Zalo">💬${!compact && ' Zalo'}</a>
-    ${/^https?:\/\//.test(lead.facebook || '') && html`<a class="cbtn" href=${lead.facebook} target="_blank" rel="noopener" onClick=${() => act('note')} title="Facebook / Messenger">📘${!compact && ' Facebook'}</a>`}
-    <a class=${'cbtn' + (lead.email ? '' : ' dis')} href=${lead.email ? U.emailLink(lead, settings, user) : undefined} target="_blank" rel="noopener" onClick=${() => lead.email && act('email')} title="Email">✉️${!compact && ' Email'}</a>
-  </div>`;
-}
-
-function Select({ value, onChange, options, placeholder, disabled }) {
-  return html`<select value=${value || ''} disabled=${disabled} onChange=${(e) => onChange(e.target.value)}>
-    ${placeholder != null && html`<option value="">${placeholder}</option>`}
-    ${options.map((o) => (typeof o === 'string' ? html`<option value=${o}>${o}</option>` : html`<option value=${o.value}>${o.label}</option>`))}
-    ${value && !options.some((o) => (typeof o === 'string' ? o : o.value) === value) && html`<option value=${value}>${value}</option>`}
-  </select>`;
-}
-
-const salesPeople = (profiles) => profiles.filter((p) => p.active);
-
 // ---------------------------------------------------------------------------
 // Hôm nay
 // ---------------------------------------------------------------------------
@@ -405,15 +387,9 @@ function TodayView({ ctx }) {
       ${stale.slice(0, 15).map((l) => html`<${LeadRow} ctx=${ctx} lead=${l} key=${l.id} />`)}
       ${stale.length > 15 && html`<button class="link more" onClick=${() => go('list', { flag: 'stale', mine: scope === 'mine' })}>Xem tất cả ${stale.length} lead →</button>`}
     <//>
+    <${CareToday} ctx=${ctx} scope=${scope} />
     ${isMgr && html`<${TeamTable} ctx=${ctx} />`}
   </div>`;
-}
-
-function Section({ title, count, tone, hint, empty, children }) {
-  return html`<section class="section">
-    <div class="section-head"><h2>${title} <span class=${'count ' + (tone || '')}>${count}</span></h2>${hint && html`<small class="muted">${hint}</small>`}</div>
-    ${count === 0 && empty ? html`<div class="empty">${empty}</div>` : html`<div class="rows">${children}</div>`}
-  </section>`;
 }
 
 function LeadRow({ ctx, lead }) {
@@ -657,20 +633,12 @@ function StageModal({ ctx, lead, stage, onClose }) {
   <//>`;
 }
 
-function FollowupInput({ value, onChange, label = 'Hẹn follow-up tiếp theo *' }) {
-  return html`<label>${label}
-    <div class="fu">
-      <input type="date" value=${value || ''} min=${U.todayStr()} onInput=${(e) => onChange(e.target.value)} />
-      ${[[1, '+1 ngày'], [3, '+3 ngày'], [7, '+1 tuần'], [14, '+2 tuần']].map(([n, t]) => html`<button type="button" class=${'chip' + (value === U.addDays(n) ? ' on' : '')} onClick=${() => onChange(U.addDays(n))}>${t}</button>`)}
-    </div>
-  </label>`;
-}
-
 // ---------------------------------------------------------------------------
 // Chi tiết lead
 // ---------------------------------------------------------------------------
 function LeadDrawer({ ctx, lead, onClose }) {
-  const { people, settings, isMgr, profiles, logActivity, updateLead, deleteLead, notify, leads, openLead } = ctx;
+  const { people, settings, isMgr, profiles, logActivity, updateLead, deleteLead, notify, leads, openLead, customers, openCustomer, startConvert } = ctx;
+  const cus = customers.find((c) => c.id === lead.customer_id);
   const [acts, setActs] = useState(null);
   const [type, setType] = useState('call');
   const [content, setContent] = useState('');
@@ -731,6 +699,8 @@ function LeadDrawer({ ctx, lead, onClose }) {
       </div>
       <div class="drawer-body">
         ${dups.length > 0 && html`<div class="dupwarn">⚠ Có thể trùng với: ${dups.slice(0, 3).map((d) => html`<button class="link" onClick=${() => openLead(d.id)}>${d.name}${d.company ? ' (' + d.company + ')' : ''}</button> `)}</div>`}
+        ${lead.stage === 'won' && !lead.customer_id && html`<div class="suggest">🎉 Lead đã chốt nhưng chưa lưu vào <b>Khách hàng</b> — lưu để theo dõi giải, chăm sóc & tặng quà về sau. <button class="btn sm" onClick=${() => startConvert(lead)}>Lưu vào khách hàng</button></div>`}
+        ${cus && html`<div class="note">🏢 Thuộc khách hàng <button class="link" onClick=${() => openCustomer(cus.id)}>${cus.name}</button></div>`}
         <${ContactButtons} ctx=${ctx} lead=${lead} onLogged=${startLog} />
 
         <form class="logbox" onSubmit=${submit}>
@@ -831,8 +801,10 @@ function LeadForm({ ctx, initial = {}, onSubmit, onCancel, submitLabel, withNote
       <label>Quy mô (người)<input type="number" min="0" value=${d.headcount ?? ''} onInput=${set('headcount')} /></label>
       <label>Thời gian dự kiến<input value=${d.event_time || ''} onInput=${set('event_time')} placeholder="VD: Tháng 11/2026" /></label>
     </div>
+    <label>Thuộc khách hàng cũ <span class="muted small">(nếu là khách đã từng tổ chức giải)</span>
+      <${Select} value=${d.customer_id || ''} onChange=${set('customer_id')} placeholder="— Khách mới —" options=${ctx.customers.slice().sort((a, b) => a.name.localeCompare(b.name, 'vi')).map((c) => ({ value: c.id, label: c.name }))} /></label>
     ${withNote && isMgr && html`<label>Giao cho<${Select} value=${d.assignee_id || ''} onChange=${set('assignee_id')} placeholder="— Để vào hàng chờ —" options=${salesPeople(profiles).map((p) => ({ value: p.id, label: p.full_name }))} /></label>`}
-    ${withNote && !isMgr && html`<p class="note">Lead mới sẽ vào hàng chờ, Trưởng KD sẽ giao người phụ trách.</p>`}
+    ${withNote && !isMgr && html`<p class="note">${d.customer_id ? 'Lead của khách cũ sẽ tự giao cho người đang phụ trách khách hàng đó.' : 'Lead mới sẽ vào hàng chờ, Trưởng KD sẽ giao người phụ trách.'}</p>`}
     ${withNote && html`<${FollowupInput} label="Hẹn liên hệ đầu tiên" value=${d.next_followup} onChange=${set('next_followup')} />`}
     <label>Ghi chú chung<textarea rows="2" value=${d.notes || ''} onInput=${set('notes')} /></label>
     ${withNote && html`<label>Nội dung trao đổi đầu tiên<textarea rows="2" value=${note} onInput=${(e) => setNote(e.target.value)} placeholder="Khách hỏi gì, qua kênh nào…" /></label>`}
@@ -841,10 +813,11 @@ function LeadForm({ ctx, initial = {}, onSubmit, onCancel, submitLabel, withNote
   </form>`;
 }
 
-function NewLeadModal({ ctx, onClose }) {
+function NewLeadModal({ ctx, onClose, initial }) {
   const { createLead, notify, openLead } = ctx;
-  return html`<${Modal} title="Thêm lead mới" onClose=${onClose} wide>
-    <${LeadForm} ctx=${ctx} withNote dupCheck submitLabel="Tạo lead" initial=${{ next_followup: U.todayStr() }} onCancel=${onClose}
+  const cus = initial?.customer_id && ctx.customers.find((c) => c.id === initial.customer_id);
+  return html`<${Modal} title=${cus ? `Cơ hội mới · ${cus.name}` : 'Thêm lead mới'} onClose=${onClose} wide>
+    <${LeadForm} ctx=${ctx} withNote dupCheck=${!cus} submitLabel="Tạo lead" initial=${{ next_followup: U.todayStr(), ...(initial || {}) }} onCancel=${onClose}
       onSubmit=${async (data, note) => { const l = await createLead(data, note); notify('Đã tạo lead'); onClose(); openLead(l.id); }} />
   <//>`;
 }
@@ -936,7 +909,11 @@ function SettingsView({ ctx }) {
   }
   async function saveSettings() {
     try {
-      const patch = { stale_days: Math.max(1, parseInt(s.stale_days, 10) || 7), email_subject: s.email_subject, email_body: s.email_body, zalo_template: s.zalo_template, email_client: s.email_client };
+      const num = (v, d) => Math.max(1, parseInt(v, 10) || d);
+      const patch = {
+        care_stale_days: num(s.care_stale_days, 60), loyal_threshold: num(s.loyal_threshold, 2), vip_threshold: num(s.vip_threshold, 4), season_days: num(s.season_days, 90),
+        occasions: (s.occasions || []).filter((o) => o.label && (o.for === 'birthday' || o.date)).map((o) => ({ ...o, before: num(o.before, 14), key: o.key || U.fold(o.label).replace(/[^a-z0-9]+/g, '-') })),
+        stale_days: Math.max(1, parseInt(s.stale_days, 10) || 7), email_subject: s.email_subject, email_body: s.email_body, zalo_template: s.zalo_template, email_client: s.email_client };
       for (const [k] of listKeys) patch[k] = s[k];
       setSettings(await store.updateSettings(patch));
       notify('Đã lưu cài đặt');
@@ -973,6 +950,35 @@ function SettingsView({ ctx }) {
     </section>
 
     <section class="section card-sec">
+      <h2>Chăm sóc khách hàng cũ</h2>
+      <label class="inline">Cảnh báo "lâu không liên hệ" sau
+        <input type="number" min="1" class="short" value=${s.care_stale_days} onInput=${(e) => setS({ ...s, care_stale_days: e.target.value })} /> ngày</label>
+      <label class="inline">Khách <b>Thân thiết</b> từ
+        <input type="number" min="1" class="short" value=${s.loyal_threshold} onInput=${(e) => setS({ ...s, loyal_threshold: e.target.value })} /> giải; <b>VIP</b> từ
+        <input type="number" min="1" class="short" value=${s.vip_threshold} onInput=${(e) => setS({ ...s, vip_threshold: e.target.value })} /> giải</label>
+      <label class="inline">Nhắc "mùa giải" trước ngày kỷ niệm giải năm trước
+        <input type="number" min="1" class="short" value=${s.season_days} onInput=${(e) => setS({ ...s, season_days: e.target.value })} /> ngày</label>
+    </section>
+
+    <section class="section card-sec">
+      <h2>Dịp tặng quà</h2>
+      <p class="muted small">Ngày dạng <code>MM-DD</code> lặp lại hằng năm (VD <code>10-20</code>). Lễ âm lịch (Tết, Trung thu) nhập ngày dương cụ thể <code>YYYY-MM-DD</code> và cập nhật mỗi năm.</p>
+      <div class="table-wrap"><table class="table compact">
+        <thead><tr><th>Dịp</th><th>Ngày</th><th>Nhắc trước (ngày)</th><th>Tặng cho</th><th></th></tr></thead>
+        <tbody>${(s.occasions || []).map((o, i) => {
+          const upd = (k) => (e) => { const occ = [...s.occasions]; occ[i] = { ...o, [k]: typeof e === 'string' ? e : e.target.value }; setS({ ...s, occasions: occ }); };
+          return html`<tr key=${i}>
+            <td><input value=${o.label} onInput=${upd('label')} /></td>
+            <td>${o.for === 'birthday' ? html`<span class="muted small">Theo ngày sinh</span>` : html`<input class="w-date" value=${o.date} onInput=${upd('date')} placeholder="MM-DD" />`}</td>
+            <td><input type="number" min="1" class="short" value=${o.before} onInput=${upd('before')} /></td>
+            <td><${Select} value=${o.for} onChange=${upd('for')} options=${Object.entries(U.OCCASION_FOR).map(([value, label]) => ({ value, label }))} /></td>
+            <td><button class="link danger" onClick=${() => setS({ ...s, occasions: s.occasions.filter((_, j) => j !== i) })}>Xoá</button></td>
+          </tr>`; })}</tbody>
+      </table></div>
+      <button class="link" onClick=${() => setS({ ...s, occasions: [...(s.occasions || []), { key: '', label: '', date: '', before: 14, for: 'all' }] })}>＋ Thêm dịp</button>
+    </section>
+
+    <section class="section card-sec">
       <h2>Danh mục lựa chọn</h2>
       <p class="muted small">Mỗi dòng một giá trị.</p>
       <div class="grid-rep">${listKeys.map(([k, label]) => html`<label>${label}<textarea rows="6" value=${(s[k] || []).join('\n')} onInput=${(e) => setS({ ...s, [k]: e.target.value.split('\n').map((x) => x.trim()).filter(Boolean) })} /></label>`)}</div>
@@ -992,12 +998,6 @@ function SettingsView({ ctx }) {
   </div>`;
 }
 
-function InlineText({ value, onSave }) {
-  const [v, setV] = useState(value || '');
-  useEffect(() => setV(value || ''), [value]);
-  return html`<input class="inline-input" value=${v} onInput=${(e) => setV(e.target.value)} onBlur=${() => v.trim() && v !== value && onSave(v.trim())} />`;
-}
-
 function AddDemoMember({ ctx }) {
   const [n, setN] = useState('');
   const add = async () => {
@@ -1011,40 +1011,64 @@ function AddDemoMember({ ctx }) {
 
 function ImportSection({ ctx }) {
   const { profiles, notify, reload } = ctx;
-  const [rows, setRows] = useState(null);
+  const [data, setData] = useState(null);
   const [busy, setBusy] = useState(false);
+  const [progress, setProgress] = useState('');
   const byName = Object.fromEntries(profiles.map((p) => [U.fold(p.full_name), p.id]));
   const stageByLabel = Object.fromEntries(U.STAGES.flatMap((s) => [[s.id, s.id], [U.fold(s.label), s.id]]));
+  const iso = (v) => (v ? new Date(v).toISOString() : undefined);
+
+  const mapLead = (r) => {
+    const created = iso(r.created_at);
+    return {
+      name: r.name, company: r.company, customer_type: r.customer_type, phone: r.phone, email: r.email, facebook: r.facebook, source: r.source,
+      need: r.need, region: r.region, headcount: r.headcount, event_time: r.event_time,
+      stage: stageByLabel[U.fold(r.stage)] || 'new', lost_reason: r.lost_reason,
+      assignee_id: byName[U.fold(r.assignee_name)] || null, next_followup: r.next_followup || null, notes: r.notes,
+      ...(created ? { created_at: created, last_activity_at: created } : {}),
+      _assignee: r.assignee_name, _customer: r.customer_name,
+    };
+  };
 
   async function onFile(e) {
     const f = e.target.files[0];
     if (!f) return;
-    const parsed = U.csvParse(await f.text());
-    const mapped = parsed.filter((r) => r.name).map((r) => {
-      const created = r.created_at ? new Date(r.created_at).toISOString() : undefined;
-      return {
-        name: r.name, company: r.company, customer_type: r.customer_type, phone: r.phone, email: r.email, facebook: r.facebook, source: r.source,
-        need: r.need, region: r.region, headcount: r.headcount, event_time: r.event_time,
-        stage: stageByLabel[U.fold(r.stage)] || 'new', lost_reason: r.lost_reason,
-        assignee_id: byName[U.fold(r.assignee_name)] || null, next_followup: r.next_followup || null, notes: r.notes,
-        ...(created ? { created_at: created, last_activity_at: created } : {}),
-        _assignee: r.assignee_name,
-      };
-    });
-    setRows(mapped);
+    const text = await f.text();
+    try {
+      if (/\.json$/i.test(f.name)) {
+        const b = JSON.parse(text);
+        setData({ customers: b.customers || [], leads: (b.leads || []).filter((r) => r.name).map(mapLead) });
+      } else setData({ customers: [], leads: U.csvParse(text).filter((r) => r.name).map(mapLead) });
+    } catch (err) {
+      notify('File không đúng định dạng: ' + err.message, 'err');
+    }
   }
-  const unmatched = rows ? [...new Set(rows.filter((r) => r._assignee && !r.assignee_id).map((r) => r._assignee))] : [];
+  const unmatched = data
+    ? [...new Set([...data.leads.filter((r) => r._assignee && !r.assignee_id).map((r) => r._assignee), ...data.customers.filter((c) => c.owner_name && !byName[U.fold(c.owner_name)]).map((c) => c.owner_name)])]
+    : [];
 
   async function run() {
     setBusy(true);
     try {
-      const n = await store.importLeads(rows.map(({ _assignee, ...r }) => r));
-      notify(`Đã nhập ${n} lead`);
-      setRows(null);
+      const cusId = {};
+      let nk = 0, ne = 0;
+      for (const [i, c] of data.customers.entries()) {
+        setProgress(`Khách hàng ${i + 1}/${data.customers.length}`);
+        const { contacts = [], events = [], owner_name, ...fields } = c;
+        const row = await store.insert('customers', { ...fields, owner_id: byName[U.fold(owner_name)] || null, last_care_at: iso(c.last_care_at) });
+        cusId[U.fold(c.name)] = row.id;
+        for (const k of contacts) { await store.insert('contacts', { ...k, customer_id: row.id }); nk++; }
+        for (const ev of events) { await store.insert('events', { ...ev, customer_id: row.id }); ne++; }
+      }
+      setProgress('Đang nhập lead…');
+      const n = await store.importLeads(data.leads.map(({ _assignee, _customer, ...r }) => ({ ...r, customer_id: cusId[U.fold(_customer)] || null })));
+      notify(`Đã nhập ${data.customers.length} khách hàng, ${ne} giải, ${nk} đầu mối, ${n} lead`);
+      setData(null);
       await reload();
     } catch (e) {
       notify(e.message, 'err');
     }
+    setProgress('');
     setBusy(false);
   }
   function template() {
@@ -1052,13 +1076,14 @@ function ImportSection({ ctx }) {
   }
 
   return html`<section class="section card-sec">
-    <h2>Nhập dữ liệu từ file CSV</h2>
-    <p class="muted small">Dùng để chuyển dữ liệu từ Excel cũ sang. Cột <code>assignee_name</code> phải khớp đúng họ tên thành viên ở trên. <button class="link" onClick=${template}>Tải file mẫu</button></p>
-    <input type="file" accept=".csv,text/csv" onChange=${onFile} />
-    ${rows && html`<div class="note">
-      Sẵn sàng nhập <b>${rows.length}</b> lead.
-      ${unmatched.length > 0 && html`<div class="err">Không tìm thấy thành viên: ${unmatched.join(', ')} — các lead này sẽ vào hàng chờ. Tạo/đổi tên thành viên trước nếu muốn giao đúng người.</div>`}
-      <div class="row"><button class="btn primary" disabled=${busy} onClick=${run}>${busy ? 'Đang nhập…' : 'Nhập ngay'}</button><button class="btn" onClick=${() => setRows(null)}>Huỷ</button></div>
+    <h2>Nhập dữ liệu</h2>
+    <p class="muted small"><b>CSV</b>: danh sách lead (<button class="link" onClick=${template}>tải file mẫu</button>). <b>JSON</b>: gói dữ liệu đầy đủ (khách hàng + đầu mối + giải + lead) do <code>tools/convert_excel.py</code> tạo ra từ Excel cũ.
+      Tên người phụ trách phải khớp họ tên thành viên ở trên.</p>
+    <input type="file" accept=".csv,.json,text/csv,application/json" onChange=${onFile} />
+    ${data && html`<div class="note">
+      Sẵn sàng nhập <b>${data.customers.length}</b> khách hàng (${data.customers.reduce((a, c) => a + (c.events?.length || 0), 0)} giải) và <b>${data.leads.length}</b> lead.
+      ${unmatched.length > 0 && html`<div class="err">Không tìm thấy thành viên: ${unmatched.join(', ')} — phần việc của họ sẽ ở trạng thái "Chưa giao". Tạo/đổi tên thành viên trước nếu muốn giao đúng người.</div>`}
+      <div class="row"><button class="btn primary" disabled=${busy} onClick=${run}>${busy ? progress || 'Đang nhập…' : 'Nhập ngay'}</button><button class="btn" disabled=${busy} onClick=${() => setData(null)}>Huỷ</button></div>
     </div>`}
   </section>`;
 }

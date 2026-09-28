@@ -19,7 +19,7 @@ export const ACTIVITY_TYPES = [
   { id: 'quote', label: 'Gửi báo giá / Profile', icon: '📄' },
   { id: 'note', label: 'Ghi chú', icon: '📝' },
 ];
-const SYSTEM_TYPES = { stage: { label: 'Đổi giai đoạn', icon: '➡️' }, assign: { label: 'Giao lead', icon: '👤' }, create: { label: 'Tạo lead', icon: '✨' } };
+const SYSTEM_TYPES = { stage: { label: 'Đổi giai đoạn', icon: '➡️' }, assign: { label: 'Giao lead', icon: '👤' }, create: { label: 'Tạo mới', icon: '✨' } };
 export const activityType = (id) => ACTIVITY_TYPES.find((t) => t.id === id) || SYSTEM_TYPES[id] || { label: id, icon: '•' };
 
 export const ROLES = { admin: 'Admin', manager: 'Trưởng KD', sales: 'Sale' };
@@ -37,7 +37,120 @@ export const DEFAULT_SETTINGS = {
   zalo_template:
     'Chào anh/chị {ten}, em là {nhan_vien} từ Fairplay Sports. Em gửi anh/chị thông tin về dịch vụ tổ chức giải {nhu_cau} ạ.',
   email_client: 'gmail',
+  care_stale_days: 60,
+  loyal_threshold: 2,
+  vip_threshold: 4,
+  season_days: 90,
+  // date: "MM-DD" (lặp hằng năm) hoặc "YYYY-MM-DD" (lễ âm lịch — cập nhật mỗi năm)
+  occasions: [
+    { key: 'tet', label: 'Tết Nguyên Đán', date: '2027-02-06', before: 45, for: 'all' },
+    { key: 'trungthu', label: 'Trung thu', date: '2027-09-15', before: 21, for: 'all' },
+    { key: '8-3', label: 'Quốc tế Phụ nữ 8/3', date: '03-08', before: 14, for: 'female' },
+    { key: '20-10', label: 'Phụ nữ Việt Nam 20/10', date: '10-20', before: 14, for: 'female' },
+    { key: 'birthday', label: 'Sinh nhật đầu mối', date: '', before: 7, for: 'birthday' },
+  ],
 };
+
+export const EVENT_STATUS = { upcoming: 'Sắp diễn ra', done: 'Đã tổ chức', cancelled: 'Đã huỷ' };
+export const GIFT_STATUS = { planned: 'Đã lên kế hoạch', given: 'Đã tặng', skipped: 'Bỏ qua' };
+export const OCCASION_FOR = { all: 'Tất cả đầu mối chính', female: 'Đầu mối nữ', birthday: 'Theo ngày sinh' };
+
+export const countEvents = (events, customerId) => events.filter((e) => e.customer_id === customerId && e.status !== 'cancelled').length;
+
+export function customerTier(n, s) {
+  if (n >= s.vip_threshold) return { id: 'vip', label: 'VIP', color: '#7c3aed' };
+  if (n >= s.loyal_threshold) return { id: 'loyal', label: 'Thân thiết', color: '#16a34a' };
+  if (n >= 1) return { id: 'one', label: 'Đã tổ chức 1 giải', color: '#0ea5e9' };
+  return { id: 'prospect', label: 'Tiềm năng', color: '#64748b' };
+}
+
+export function customerFlags(c, settings) {
+  const t = todayStr();
+  return {
+    overdue: !!c.next_care && c.next_care < t,
+    dueToday: c.next_care === t,
+    due: !!c.next_care && c.next_care <= t,
+    stale: !!c.last_care_at && daysSince(c.last_care_at) >= settings.care_stale_days,
+    noCare: !c.next_care,
+  };
+}
+
+// Ngày diễn ra gần nhất của một dịp (giữ hiển thị thêm 7 ngày sau lễ để kịp ghi nhận "đã tặng")
+export function nextOccurrence(dateStr, graceDays = 7) {
+  const floor = addDays(-graceDays);
+  if (/^\d{2}-\d{2}$/.test(dateStr || '')) {
+    const y = +todayStr().slice(0, 4);
+    const d = `${y}-${dateStr}`;
+    return d >= floor ? d : `${y + 1}-${dateStr}`;
+  }
+  if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr || '')) return dateStr >= floor ? dateStr : null;
+  return null;
+}
+
+// Danh sách việc tặng quà cần làm: [{key, occasion, date, customer, contact}]
+export function giftTasks({ customers, contacts, events, gifts, settings }, horizonExtra = 0) {
+  const t = todayStr();
+  const done = new Set(gifts.map((g) => g.occasion_key + '|' + (g.contact_id || g.customer_id)));
+  const active = new Set(events.filter((e) => e.status !== 'cancelled').map((e) => e.customer_id));
+  const cus = Object.fromEntries(customers.map((c) => [c.id, c]));
+  const out = [];
+  for (const o of settings.occasions || []) {
+    if (o.for === 'birthday') {
+      for (const k of contacts) {
+        if (!k.birthday || !cus[k.customer_id]) continue;
+        const d = nextOccurrence(k.birthday.slice(5));
+        if (!d || daysBetween(t, d) > o.before + horizonExtra) continue;
+        const key = `${o.key}-${d.slice(0, 4)}`;
+        out.push({ key, occasion: o.label, date: d, customer: cus[k.customer_id], contact: k, done: done.has(key + '|' + k.id) });
+      }
+      continue;
+    }
+    const d = nextOccurrence(o.date);
+    if (!d || daysBetween(t, d) > o.before + horizonExtra) continue;
+    const key = `${o.key}-${d.slice(0, 4)}`;
+    for (const k of contacts) {
+      if (!active.has(k.customer_id) || !cus[k.customer_id]) continue;
+      if (o.for === 'female' ? k.gender !== 'Nữ' : !k.is_primary) continue;
+      out.push({ key, occasion: o.label, date: d, customer: cus[k.customer_id], contact: k, done: done.has(key + '|' + k.id) });
+    }
+  }
+  return out.sort((a, b) => a.date.localeCompare(b.date));
+}
+
+// Gợi ý chăm sóc đặc thù: khách thân thiết/VIP chưa có quà tri ân, tri ân sau giải, mùa giải năm trước
+export function careSuggestions({ customers, events, gifts, leads, settings }) {
+  const t = todayStr();
+  const giftKeys = new Set(gifts.map((g) => g.customer_id + '|' + g.occasion_key));
+  const byCus = {};
+  for (const e of events) if (e.status !== 'cancelled') (byCus[e.customer_id] ||= []).push(e);
+  const loyal = [], thanks = [], season = [];
+  for (const c of customers) {
+    const evs = (byCus[c.id] || []).slice().sort((a, b) => (b.event_date || '').localeCompare(a.event_date || ''));
+    const n = evs.length;
+    if (n >= settings.vip_threshold && !giftKeys.has(c.id + '|vip')) loyal.push({ customer: c, n, key: 'vip', label: 'Tri ân khách VIP' });
+    else if (n >= settings.loyal_threshold && !giftKeys.has(c.id + '|loyal') && !giftKeys.has(c.id + '|vip'))
+      loyal.push({ customer: c, n, key: 'loyal', label: 'Tri ân khách thân thiết' });
+    for (const e of evs)
+      if (e.status === 'done' && e.event_date && e.event_date <= t && daysBetween(e.event_date, t) <= 21 && !giftKeys.has(c.id + '|thanks-' + e.id))
+        thanks.push({ customer: c, event: e, key: 'thanks-' + e.id });
+    const hasUpcoming = evs.some((e) => e.status === 'upcoming' && (e.event_date || '9999') >= t);
+    const hasOpenLead = leads.some((l) => l.customer_id === c.id && isOpen(l.stage));
+    if (!hasUpcoming && !hasOpenLead) {
+      for (const e of evs) {
+        if (!e.event_date) continue;
+        const y = +t.slice(0, 4);
+        const anniv = [y, y + 1].map((yy) => yy + e.event_date.slice(4)).find((d) => d >= t);
+        const gap = daysBetween(t, anniv);
+        if (gap <= settings.season_days && e.event_date < addDays(-180)) {
+          season.push({ customer: c, event: e, anniv, gap });
+          break;
+        }
+      }
+    }
+  }
+  season.sort((a, b) => a.gap - b.gap);
+  return { loyal, thanks, season };
+}
 
 const pad = (n) => String(n).padStart(2, '0');
 export const ymd = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
@@ -52,7 +165,7 @@ export const fmtDate = (s) => (s ? parseD(s).toLocaleDateString('vi-VN', { day: 
 export const fmtDateTime = (s) =>
   s ? parseD(s).toLocaleString('vi-VN', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' }) : '';
 export const daysBetween = (a, b) => Math.round((parseD(b) - parseD(a)) / 86400000);
-export const daysSince = (iso) => Math.floor((Date.now() - parseD(iso).getTime()) / 86400000);
+export const daysSince = (iso) => Math.max(0, Math.floor((Date.now() - parseD(iso).getTime()) / 86400000));
 
 export function relDay(date) {
   if (!date) return '';

@@ -1,10 +1,10 @@
 """Chuyển file Excel cũ "Tổng hợp thông tin công việc Fairplay Sports.xlsx" thành CSV để nhập vào CRM.
 
-Chạy:  python3 tools/convert_excel.py "<đường dẫn file xlsx>" import/leads.csv
-Lấy 2 sheet: "DS KH ads FB" (lead cá nhân từ quảng cáo) và "DS Giải đấu" (deal doanh nghiệp).
-File CSV chứa dữ liệu khách hàng thật — KHÔNG commit lên GitHub (thư mục import/ đã được .gitignore).
+Chạy:  python3 tools/convert_excel.py "<đường dẫn file xlsx>" import/fairplay-import.json
+Lấy 2 sheet: "DS KH ads FB" (lead cá nhân từ quảng cáo) và "DS Giải đấu" (giải đã làm → khách hàng; deal chưa chốt → lead).
+File JSON chứa dữ liệu khách hàng thật — KHÔNG commit lên GitHub (thư mục import/ đã được .gitignore).
 """
-import csv
+import json
 import datetime as dt
 import re
 import sys
@@ -85,44 +85,85 @@ def fb_leads(ws):
     return out
 
 
+# Gộp các dòng trong "DS Giải đấu" về cùng một khách hàng. Kiểm tra lại & sửa nếu gộp sai.
+CUSTOMER_MAP = {
+    'giải vietcg': 'VIETCG',
+    'mbbank cầu lông': 'MB Bank',
+    'hội thao vpbanks': 'VPBankS',
+    'svtech': 'SVtech', 'svtech lần 02': 'SVtech',
+    'g.empire': 'G.Empire',
+    'msb đà nẵng': 'MSB', 'msb tphcm': 'MSB', 'msb hà nội': 'MSB',
+    'rox - diễn châu, nghệ an': 'ROX', 'rox - hà nội': 'ROX',
+    'pickleball tranh cúp nhân tài': 'Nhân Tài Việt',
+}
+WON = {'Đã hoàn thành', 'Đang thực hiện'}
+
+
+def canonical(name):
+    return CUSTOMER_MAP.get(name.strip().lower(), name.strip())
+
+
+def parse_date(v):
+    if isinstance(v, dt.datetime):
+        return v.date().isoformat()
+    m = re.search(r'(\d{1,2})/(\d{1,2})/(\d{4})', txt(v))
+    return f'{m.group(3)}-{int(m.group(2)):02d}-{int(m.group(1)):02d}' if m and 2000 < int(m.group(3)) < 2100 else ''
+
+
 def deals(ws):
-    stage_map = {'Đang đàm phán': 'negotiating', 'Đã hoàn thành': 'won', 'Đang thực hiện': 'won',
-                 'Chưa bắt đầu': 'consulting', 'Bị chặn': 'negotiating'}
-    out = []
-    for r in ws.iter_rows(min_row=3, values_only=True):
+    """Trả về (customers, leads): giải đã làm → khách hàng + giải; deal chưa chốt → lead."""
+    stage_map = {'Đang đàm phán': 'negotiating', 'Chưa bắt đầu': 'consulting', 'Bị chặn': 'negotiating'}
+    customers, leads = {}, []
+    today = dt.date.today().isoformat()
+    rows = [r for r in ws.iter_rows(min_row=3, values_only=True) if txt(r[0])]
+    for r in rows:
         name, status, owner, phase, pic, due, sport, note, plan, extra = (list(r) + [None] * 10)[:10]
-        name = txt(name)
-        if not name:
-            continue
-        status = fix_d(txt(status))
+        name, status = txt(name), fix_d(txt(status))
         notes = []
-        if status == 'Bị chặn':
-            notes.append('⚠ Trạng thái cũ: Bị chặn / tạm dừng')
         for label, v in (('Ghi chú', note), ('Phương án', plan), ('Khác', extra)):
             v = txt(v) if not isinstance(v, dt.datetime) else v.strftime('%d/%m/%Y')
             if v:
                 notes.append(f'{label}: {v}')
+        cname = canonical(name)
+        if status in WON:
+            d = parse_date(due)
+            if not d and txt(due):
+                notes.insert(0, f'Thời gian: {txt(due)}')
+            c = customers.setdefault(cname, {'name': cname, 'customer_type': 'Doanh nghiệp', 'owner_name': '', 'notes': '[Nhập từ Excel cũ]', 'contacts': [], 'events': []})
+            if txt(pic) or txt(owner):
+                c['owner_name'] = txt(pic) or txt(owner)
+            c['events'].append({'name': name, 'sport': need_of(sport), 'event_date': d or None,
+                                'status': 'upcoming' if d and d > today else 'done', 'notes': '\n'.join(notes)})
+            continue
+        if status == 'Bị chặn':
+            notes.insert(0, '⚠ Trạng thái cũ: Bị chặn / tạm dừng')
         notes.append('[Nhập từ Excel cũ – sheet DS Giải đấu]')
-        out.append({
-            'name': name, 'company': name, 'customer_type': 'Doanh nghiệp', 'source': 'Khác',
-            'need': need_of(sport),
+        leads.append({
+            'name': name, 'company': cname, 'customer_type': 'Doanh nghiệp', 'source': 'Khác', 'need': need_of(sport),
             'event_time': due.strftime('%d/%m/%Y') if isinstance(due, dt.datetime) else txt(due),
             'stage': stage_map.get(status, 'consulting'), 'assignee_name': txt(pic) or txt(owner),
-            'notes': '\n'.join(notes), 'created_at': date_iso(due) if isinstance(due, dt.datetime) and due < dt.datetime.now() else '',
+            'notes': '\n'.join(notes), 'customer_name': cname,
         })
-    return out
+    for c in customers.values():
+        dates = sorted(e['event_date'] for e in c['events'] if e['event_date'])
+        if dates:
+            c['last_care_at'] = dates[-1] + 'T09:00:00'
+    for l in leads:
+        if l['customer_name'] not in customers:
+            l['customer_name'] = ''
+    return list(customers.values()), leads
 
 
 def main(src, dst):
     wb = openpyxl.load_workbook(src, data_only=True)
-    rows = fb_leads(wb['DS KH ads FB']) + deals(wb['DS Giải đấu'])
-    with open(dst, 'w', newline='', encoding='utf-8-sig') as f:
-        w = csv.DictWriter(f, fieldnames=COLUMNS)
-        w.writeheader()
-        for r in rows:
-            w.writerow({k: r.get(k, '') for k in COLUMNS})
-    names = sorted({r['assignee_name'] for r in rows if r['assignee_name']})
-    print(f'Đã xuất {len(rows)} lead → {dst}')
+    customers, deal_leads = deals(wb['DS Giải đấu'])
+    leads = fb_leads(wb['DS KH ads FB']) + deal_leads
+    with open(dst, 'w', encoding='utf-8') as f:
+        json.dump({'customers': customers, 'leads': leads}, f, ensure_ascii=False, indent=1)
+    names = sorted({r['assignee_name'] for r in leads if r.get('assignee_name')} | {c['owner_name'] for c in customers if c['owner_name']})
+    print(f'Đã xuất {len(customers)} khách hàng ({sum(len(c["events"]) for c in customers)} giải) + {len(leads)} lead → {dst}')
+    for c in sorted(customers, key=lambda c: -len(c['events'])):
+        print(f'  {c["name"]}: {len(c["events"])} giải · phụ trách: {c["owner_name"] or "—"}')
     print('Tên nhân viên cần khớp trong CRM:', ', '.join(names))
 
 
