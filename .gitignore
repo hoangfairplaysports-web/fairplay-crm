@@ -1,0 +1,5 @@
+# Dữ liệu khách hàng thật — không bao giờ đưa lên GitHub
+import/
+*.xlsx
+*.csv
+.DS_Store
