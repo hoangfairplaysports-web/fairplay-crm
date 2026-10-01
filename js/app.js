@@ -86,6 +86,8 @@ function App() {
 
   if (user === undefined) return html`<div class="splash">Đang tải…</div>`;
   if (!user) return html`<${Login} onLogin=${setUser} />`;
+  if (user.crm_access === false)
+    return html`<div class="splash">Tài khoản này chỉ dùng cho Fairplay Checklist, chưa được cấp quyền vào CRM.<br /><button class="btn" onClick=${() => store.signOut().then(() => setUser(null))}>Đăng xuất</button></div>`;
   if (!user.active)
     return html`<div class="splash">Tài khoản đã bị khoá. Liên hệ Admin.<br /><button class="btn" onClick=${() => store.signOut().then(() => setUser(null))}>Đăng xuất</button></div>`;
 

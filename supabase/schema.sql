@@ -31,9 +31,12 @@ drop trigger if exists on_auth_user_created on auth.users;
 create trigger on_auth_user_created after insert on auth.users
   for each row execute function public.handle_new_user();
 
+-- crm_access = false: tài khoản chỉ dùng Fairplay Checklist (Marketing, BOD…), không vào được CRM
+alter table public.profiles add column if not exists crm_access boolean not null default true;
+
 create or replace function public.my_role() returns text
 language sql stable security definer set search_path = public as $$
-  select role from public.profiles where id = auth.uid() and active
+  select role from public.profiles where id = auth.uid() and active and crm_access
 $$;
 
 create or replace function public.is_member() returns boolean
