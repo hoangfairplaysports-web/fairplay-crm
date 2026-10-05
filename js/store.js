@@ -47,6 +47,7 @@ async function createSupabaseStore() {
 
   return {
     mode: 'live',
+    sb, // dùng cho mục Triển khai giải (bảng ev_*)
     async getUser() {
       const { data } = await sb.auth.getSession();
       return profileOf(data.session?.user);

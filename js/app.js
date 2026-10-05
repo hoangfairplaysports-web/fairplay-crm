@@ -5,6 +5,7 @@ import { Modal, StagePill, FollowBadge, LastTouch, ContactButtons, Select, sales
 import { CustomersView, CustomerDrawer, CareView, CareToday, ConvertLeadModal } from './customers.js';
 import { TABLES } from './store.js';
 import { TournamentsView, TournamentModal, EventStatusPill } from './tournaments.js';
+import { DeployView } from './deploy.js';
 
 let store;
 
@@ -16,6 +17,7 @@ const VIEWS = [
   { id: 'list', label: 'Danh sách', icon: '📋' },
   { id: 'pipeline', label: 'Pipeline', icon: '🗂️' },
   { id: 'tournaments', label: 'Giải đấu', icon: '🏆' },
+  { id: 'deploy', label: 'Triển khai giải', icon: '🚀' },
   { id: 'customers', label: 'Khách hàng', icon: '🏢' },
   { id: 'care', label: 'Chăm sóc', icon: '🎁' },
   { id: 'reports', label: 'Báo cáo', icon: '📊' },
@@ -228,6 +230,7 @@ function App() {
         : view === 'reports' ? html`<${ReportsView} ctx=${ctx} />`
         : view === 'customers' ? html`<${CustomersView} ctx=${ctx} />`
         : view === 'tournaments' ? html`<${TournamentsView} ctx=${ctx} />`
+        : view === 'deploy' ? html`<${DeployView} ctx=${ctx} />`
         : view === 'care' ? html`<${CareView} ctx=${ctx} />`
         : view === 'settings' && isAdmin ? html`<${SettingsView} ctx=${ctx} />`
         : html`<${TodayView} ctx=${ctx} />`}

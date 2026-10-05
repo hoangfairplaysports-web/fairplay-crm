@@ -342,3 +342,12 @@ td.num.good { color: var(--ok); font-weight: 600; }
   .demo-users { grid-template-columns: 1fr; }
   .board { grid-auto-columns: 80%; }
 }
+
+/* Triển khai giải */
+.drawer.wide-drawer { width: min(1100px, 100%); }
+.drawer.wide-drawer .seg { flex-wrap: wrap; }
+.table.items input, .table.items select { font-size: 12.5px; padding: 4px 6px; max-width: 150px; }
+.w-num { width: 110px; text-align: right; }
+.bad-sel { border-color: var(--bad); color: var(--bad); }
+.card-sec.late { border-color: var(--bad); }
+.fs .grid2, .fs .grid3 { margin-top: 8px; }
