@@ -661,7 +661,7 @@ function LeadDrawer({ ctx, lead, onClose }) {
   const [edit, setEdit] = useState(false);
   const noteRef = useRef();
 
-  const loadActs = () => store.listActivities(lead.id).then(setActs, (e) => notify(e.message, 'err'));
+  const loadActs = () => store.listActivities({ lead_id: lead.id }).then(setActs, (e) => notify(e.message, 'err'));
   useEffect(() => {
     loadActs();
     setStage(lead.stage);

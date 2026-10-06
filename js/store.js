@@ -105,6 +105,7 @@ async function createSupabaseStore() {
       chk(await sb.from('leads').delete().eq('id', id));
     },
     async listActivities(filter) {
+      if (typeof filter === 'string') filter = { lead_id: filter };
       const [k, v] = Object.entries(filter)[0];
       return chk(await sb.from('activities').select('*').eq(k, v).order('created_at', { ascending: false }));
     },
@@ -272,6 +273,7 @@ function createDemoStore() {
       save();
     },
     async listActivities(filter) {
+      if (typeof filter === 'string') filter = { lead_id: filter };
       need();
       const [k, v] = Object.entries(filter)[0];
       return copy(db.activities.filter((a) => a[k] === v)).sort((a, b) => b.created_at.localeCompare(a.created_at));
