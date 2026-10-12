@@ -308,6 +308,8 @@ td.num.good { color: var(--ok); font-weight: 600; }
 .nowrap { white-space: nowrap; }
 .addmember { margin-top: 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: #f7fafd; }
 
+tr.dim td { color: var(--muted); }
+
 /* Mobile */
 @media (max-width: 860px) {
   .hide-sm { display: none; }

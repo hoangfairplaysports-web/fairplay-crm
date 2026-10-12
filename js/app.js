@@ -911,7 +911,7 @@ function SettingsView({ ctx }) {
   const listKeys = [['sources', 'Nguồn lead'], ['needs', 'Nhu cầu / bộ môn'], ['customer_types', 'Loại khách hàng'], ['regions', 'Khu vực'], ['lost_reasons', 'Lý do thất bại']];
 
   async function saveProfile(p, patch) {
-    if (p.id === user.id && (patch.role && patch.role !== 'admin' || patch.active === false)) return notify('Không thể tự hạ quyền / khoá chính mình', 'err');
+    if (p.id === user.id && (patch.role && patch.role !== 'admin' || patch.active === false || patch.crm_access === false)) return notify('Không thể tự hạ quyền / khoá chính mình', 'err');
     try {
       const u = await store.updateProfile(p.id, patch);
       setProfiles((ps) => ps.map((x) => (x.id === u.id ? u : x)));
@@ -950,13 +950,15 @@ function SettingsView({ ctx }) {
     <div class="page-head"><h1>Cài đặt</h1></div>
     <section class="section card-sec">
       <h2>Thành viên & phân quyền</h2>
-      <p class="muted small"><b>Admin</b>: toàn quyền, cài đặt. <b>Trưởng KD</b>: giao lead, xoá lead, xem báo cáo đội. <b>Sale</b>: xem/sửa mọi lead, ghi tương tác; lead do sale tạo vào hàng chờ.</p>
+      <p class="muted small"><b>Admin</b>: toàn quyền, cài đặt. <b>Trưởng KD</b>: giao lead, xoá lead, xem báo cáo đội. <b>Sale</b>: xem/sửa mọi lead, ghi tương tác; lead do sale tạo vào hàng chờ.
+        Cột <b>Dùng CRM</b>: tài khoản tạo bên Fairplay Checklist mặc định chỉ dùng Checklist — tick để cho họ vào CRM (không cần tạo tài khoản mới).</p>
       <div class="table-wrap"><table class="table compact">
-        <thead><tr><th>Họ tên</th><th>Email</th><th>Vai trò</th><th>Hoạt động</th><th></th></tr></thead>
-        <tbody>${profiles.map((p) => html`<tr key=${p.id}>
+        <thead><tr><th>Họ tên</th><th>Email</th><th>Vai trò</th><th>Dùng CRM</th><th>Hoạt động</th><th></th></tr></thead>
+        <tbody>${profiles.slice().sort((a, b) => (a.crm_access === false) - (b.crm_access === false)).map((p) => html`<tr key=${p.id} class=${p.crm_access === false ? 'dim' : ''}>
           <td><${InlineText} value=${p.full_name} onSave=${(v) => saveProfile(p, { full_name: v })} /></td>
           <td class="small">${p.email}</td>
           <td><${Select} value=${p.role} onChange=${(v) => saveProfile(p, { role: v })} options=${Object.entries(U.ROLES).map(([value, label]) => ({ value, label }))} /></td>
+          <td><input type="checkbox" title="Cho phép đăng nhập Fairplay CRM" checked=${p.crm_access !== false} onChange=${(e) => saveProfile(p, { crm_access: e.target.checked })} /></td>
           <td><input type="checkbox" checked=${p.active} onChange=${(e) => saveProfile(p, { active: e.target.checked })} /></td>
           <td>${p.id !== user.id && html`<button class="link small" onClick=${() => resetPw(p)}>Đặt lại mật khẩu</button>`}</td>
         </tr>`)}</tbody>
