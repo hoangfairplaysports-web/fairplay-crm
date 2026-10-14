@@ -214,6 +214,7 @@ function App() {
     ${store.mode === 'demo' && html`<${DemoBar} user=${user} profiles=${profiles} onSwitch=${async (id) => setUser(await store.switchUser(id))} onReset=${async () => { await store.resetDemo(); reload(); notify('Đã khôi phục dữ liệu mẫu'); }} />`}
     <header class="topbar">
       <div class="brand"><img src="assets/logo-mark.png" alt="Fairplay Sports" /><span class="wordmark"><b>FAIRPLAY</b><small>SPORTS · CRM</small></span></div>
+      <a class="btn appswitch" href="https://hoangfairplaysports-web.github.io/fairplay-checklist/" title="Mở Fairplay Checklist (cùng tài khoản)">☑️ Checklist</a>
       <nav class="tabs">
         ${views.map((v) => html`<a href=${'#/' + v.id} class=${view === v.id ? 'on' : ''} onClick=${(e) => { e.preventDefault(); go(v.id); }}><span class="ic">${v.icon}</span><span>${v.label}</span></a>`)}
       </nav>
