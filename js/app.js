@@ -6,6 +6,7 @@ import { CustomersView, CustomerDrawer, CareView, CareToday, ConvertLeadModal } 
 import { TABLES } from './store.js';
 import { TournamentsView, TournamentModal, EventStatusPill } from './tournaments.js';
 import { DeployView } from './deploy.js';
+import { ProfitView } from './profit.js';
 
 let store;
 
@@ -18,6 +19,7 @@ const VIEWS = [
   { id: 'pipeline', label: 'Pipeline', icon: '🗂️' },
   { id: 'tournaments', label: 'Giải đấu', icon: '🏆' },
   { id: 'deploy', label: 'Triển khai giải', icon: '🚀' },
+  { id: 'profit', label: 'Lợi nhuận tháng', icon: '💰', finance: true },
   { id: 'customers', label: 'Khách hàng', icon: '🏢' },
   { id: 'care', label: 'Chăm sóc', icon: '🎁' },
   { id: 'reports', label: 'Báo cáo', icon: '📊' },
@@ -95,6 +97,8 @@ function App() {
 
   const isMgr = ['admin', 'manager'].includes(user.role);
   const isAdmin = user.role === 'admin';
+  // Quyền tài chính (tiền, giá nhập, lợi nhuận): cột profiles.finance_access; chưa chạy migration 03 thì theo Admin như cũ
+  const canFinance = user.finance_access ?? isAdmin;
   const people = Object.fromEntries(profiles.map((p) => [p.id, p]));
   const go = (v, preset) => {
     setListPreset(preset || null);
@@ -196,7 +200,7 @@ function App() {
   }
 
   const ctx = {
-    user, isMgr, isAdmin, profiles, people, leads: leads || [], settings, notify, go, listPreset,
+    user, isMgr, isAdmin, canFinance, profiles, people, leads: leads || [], settings, notify, go, listPreset,
     openLead: setOpenLeadId, updateLead, logActivity, createLead, bulkAssign, bulkStage, deleteLead, reload,
     setSettings, setProfiles, store,
     customers, contacts, events, gifts, saveRow, removeRow, logCare,
@@ -206,7 +210,7 @@ function App() {
     openEvent: (x) => setEventModal(x && x.id ? { row: x } : { init: x || {} }),
   };
   ctx.openLead = (id) => { setOpenCustomerId(null); setOpenLeadId(id); };
-  const views = VIEWS.filter((v) => !v.admin || isAdmin);
+  const views = VIEWS.filter((v) => (!v.admin || isAdmin) && (!v.finance || canFinance));
   const openLead = leads?.find((l) => l.id === openLeadId);
   const openCustomer = customers.find((c) => c.id === openCustomerId);
 
@@ -232,6 +236,7 @@ function App() {
         : view === 'customers' ? html`<${CustomersView} ctx=${ctx} />`
         : view === 'tournaments' ? html`<${TournamentsView} ctx=${ctx} />`
         : view === 'deploy' ? html`<${DeployView} ctx=${ctx} />`
+        : view === 'profit' && canFinance ? html`<${ProfitView} ctx=${ctx} />`
         : view === 'care' ? html`<${CareView} ctx=${ctx} />`
         : view === 'settings' && isAdmin ? html`<${SettingsView} ctx=${ctx} />`
         : html`<${TodayView} ctx=${ctx} />`}

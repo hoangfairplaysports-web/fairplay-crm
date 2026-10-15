@@ -5,6 +5,7 @@ import { html, useState, useEffect, useMemo } from 'https://cdn.jsdelivr.net/npm
 import { Modal } from './ui.js';
 import * as U from './util.js';
 import { parseQuote, generateChecklist, tasksForItem, defaultPayments, eventHealth, money, addDays, PHASES, fold } from './ev-core.js';
+import { parseAcceptance, matchAcceptance, acceptanceItems, eventProfit, PAYEE, DEFAULTS } from './finance-core.js';
 
 const CHECKLIST_URL = 'https://hoangfairplaysports-web.github.io/fairplay-checklist/#events';
 const EV_STATUS = { preparing: 'Đang chuẩn bị', running: 'Đang diễn ra', done: 'Đã xong', cancelled: 'Đã huỷ' };
@@ -26,6 +27,7 @@ const ok = ({ data, error }) => {
 // ---------------------------------------------------------------------------
 export function DeployView({ ctx }) {
   const { store, isAdmin, notify } = ctx;
+  const fin = ctx.canFinance; // xem tiền, giá nhập, lợi nhuận
   const sb = store.sb;
   const [data, setData] = useState(null);
   const [tab, setTab] = useState('active');
@@ -35,11 +37,11 @@ export function DeployView({ ctx }) {
   async function load() {
     try {
       const [events, tasks, items, payments, suppliers, members] = await Promise.all([
-        sb.from(isAdmin ? 'ev_events' : 'ev_events_public').select('*').order('event_date').then(ok),
+        sb.from(fin ? 'ev_events' : 'ev_events_public').select('*').order('event_date').then(ok),
         sb.from('ev_tasks').select('id, event_id, status, due_date, phase').then(ok),
-        isAdmin ? sb.from('ev_items').select('*').order('sort').then(ok) : [],
-        isAdmin ? sb.from('ev_payments').select('*').order('sort').then(ok) : [],
-        isAdmin ? sb.from('ev_suppliers').select('*').order('name').then(ok) : [],
+        fin ? sb.from('ev_items').select('*').order('sort').then(ok) : [],
+        fin ? sb.from('ev_payments').select('*').order('sort').then(ok) : [],
+        fin ? sb.from('ev_suppliers').select('*').order('name').then(ok) : [],
         sb.from('cl_members').select('id, full_name, role, active').then(ok).catch(() => []),
       ]);
       setData({ events, tasks, items, payments, suppliers, members });
@@ -64,11 +66,11 @@ export function DeployView({ ctx }) {
     <div class="page-head">
       <div><h1>🚀 Triển khai giải</h1><div class="muted">Giải đã chốt / ký hợp đồng. Nhập báo giá → tự tạo checklist bên Fairplay Checklist + bảng theo dõi tiền.</div></div>
       <div class="row">
-        <div class="seg">${[['active', 'Đang triển khai'], ['done', 'Đã xong'], ...(isAdmin ? [['suppliers', 'Nhà cung cấp']] : [])].map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
-        ${isAdmin && html`<button class="btn primary" onClick=${() => setImporting(true)}>⬆ Nhập báo giá</button>`}
+        <div class="seg">${[['active', 'Đang triển khai'], ['done', 'Đã xong'], ...(fin ? [['suppliers', 'Nhà cung cấp']] : [])].map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
+        ${isAdmin && fin && html`<button class="btn primary" onClick=${() => setImporting(true)}>⬆ Nhập báo giá</button>`}
       </div>
     </div>
-    ${isAdmin && tab !== 'suppliers' && html`<div class="kpis">
+    ${fin && tab !== 'suppliers' && html`<div class="kpis">
       <div class="kpi info"><b>${data.events.filter((e) => !['done', 'cancelled'].includes(e.status)).length}</b><span>Giải đang triển khai</span></div>
       <div class=${'kpi ' + (warnN ? 'bad' : 'good')}><b>${warnN}</b><span>Giải cần chú ý</span></div>
       <div class="kpi"><b>${money(totals.reduce((a, h) => a + h.dueIn - h.paidIn, 0))}</b><span>Khách còn phải trả</span></div>
@@ -77,7 +79,7 @@ export function DeployView({ ctx }) {
     ${tab === 'suppliers' ? html`<${Suppliers} ctx=${ctx} data=${data} reload=${load} />` : html`
       ${!evs.length && html`<div class="empty">${tab === 'active' ? 'Chưa có giải nào. Bấm "⬆ Nhập báo giá" khi giải đã chốt / ký hợp đồng.' : 'Chưa có giải đã xong.'}</div>`}
       ${evs.length > 0 && html`<div class="table-wrap"><table class="table leads">
-        <thead><tr><th>Giải</th><th>Ngày</th><th>Hợp đồng</th><th>Checklist</th>${isAdmin && html`<th class="num">Khách đã trả</th><th class="num">Đã trả NCC</th>`}<th>Cần chú ý</th></tr></thead>
+        <thead><tr><th>Giải</th><th>Ngày</th><th>Hợp đồng</th><th>Checklist</th>${fin && html`<th class="num">Khách đã trả</th><th class="num">Đã trả NCC</th>`}<th>Cần chú ý</th></tr></thead>
         <tbody>${evs.map((e) => {
           const h = eventHealth(e, data, t);
           const d = e.event_date ? U.daysBetween(t, e.event_date) : null;
@@ -87,7 +89,7 @@ export function DeployView({ ctx }) {
             <td data-l="Hợp đồng">${e.contract_signed_at ? html`<span class="badge ok">Đã ký ${U.fmtDate(e.contract_signed_at)}</span>`
               : e.contract_deadline && e.contract_deadline < t ? html`<span class="badge bad">Quá hạn ký</span>` : html`<span class="badge warn">Chưa ký${e.contract_deadline ? ' · hạn ' + U.fmtDate(e.contract_deadline) : ''}</span>`}</td>
             <td data-l="Checklist">${h.done}/${h.tasks} (${h.pct}%)${h.overdue ? html` <span class="badge bad">${h.overdue} quá hạn</span>` : ''}</td>
-            ${isAdmin && html`<td data-l="Khách đã trả" class="num">${money(h.paidIn)}<div class="muted small">/ ${money(h.dueIn)}</div></td>
+            ${fin && html`<td data-l="Khách đã trả" class="num">${money(h.paidIn)}<div class="muted small">/ ${money(h.dueIn)}</div></td>
               <td data-l="Đã trả NCC" class="num">${money(h.paidOut)}<div class="muted small">/ ${money(h.cost)}</div></td>`}
             <td data-l="Cần chú ý">${h.warn.map((w) => html`<span class="badge bad">${w}</span> `)}</td>
           </tr>`;
@@ -226,13 +228,16 @@ function ImportQuote({ ctx, data, onClose, onDone }) {
 // ---------------------------------------------------------------------------
 function DeployDrawer({ ctx, ev, data, reload, onClose }) {
   const { isAdmin } = ctx;
+  const fin = ctx.canFinance;
   const [tab, setTab] = useState('overview');
+  const [importAcc, setImportAcc] = useState(false);
   const h = eventHealth(ev, data, today());
-  const TABS = [['overview', 'Tổng quan'], ...(isAdmin ? [['pay', 'Thu tiền khách'], ['items', 'Hạng mục & NCC'], ['extra', 'Phát sinh'], ['accept', 'Nghiệm thu'], ['files', 'Hồ sơ']] : [])];
+  const TABS = [['overview', 'Tổng quan'], ...(fin ? [['pay', 'Thu tiền khách'], ['items', 'Hạng mục & NCC'], ['extra', 'Phát sinh'], ['accept', 'Nghiệm thu'], ['profit', 'Lợi nhuận'], ['files', 'Hồ sơ']] : [])];
   return html`<div class="drawer-overlay" onMouseDown=${(e) => e.target === e.currentTarget && onClose()}>
     <aside class="drawer wide-drawer">
       <div class="drawer-head"><div><h2>${ev.name}</h2><div class="muted">${[ev.client_name, ev.venue, ev.event_date && U.fmtDate(ev.event_date)].filter(Boolean).join(' · ')}</div>
-        <div class="row" style="margin-top:6px">${h.warn.map((w) => html`<span class="badge bad">${w}</span>`)}</div></div>
+        <div class="row" style="margin-top:6px">${h.warn.map((w) => html`<span class="badge bad">${w}</span>`)}
+          ${isAdmin && fin && html`<button class="btn sm" onClick=${() => setImportAcc(true)}>⬆ Nhập file nghiệm thu</button>`}</div></div>
         <button class="x" onClick=${onClose}>×</button></div>
       <div class="seg" style="margin:0 18px">${TABS.map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
       <div class="drawer-body">
@@ -241,9 +246,11 @@ function DeployDrawer({ ctx, ev, data, reload, onClose }) {
         ${tab === 'items' && html`<${Items} ctx=${ctx} ev=${ev} data=${data} reload=${reload} />`}
         ${tab === 'extra' && html`<${Extras} ctx=${ctx} ev=${ev} data=${data} reload=${reload} />`}
         ${tab === 'accept' && html`<${Acceptance} ctx=${ctx} ev=${ev} data=${data} reload=${reload} />`}
+        ${tab === 'profit' && html`<${ProfitTab} ctx=${ctx} ev=${ev} data=${data} reload=${reload} onImport=${() => setImportAcc(true)} />`}
         ${tab === 'files' && html`<${Files} ctx=${ctx} ev=${ev} />`}
       </div>
     </aside>
+    ${importAcc && html`<${ImportAcceptance} ctx=${ctx} ev=${ev} data=${data} onClose=${() => setImportAcc(false)} onDone=${async () => { setImportAcc(false); await reload(); setTab('profit'); }} />`}
   </div>`;
 }
 
@@ -262,6 +269,9 @@ function useSave(ctx, reload) {
 function Overview({ ctx, ev, data, h, reload }) {
   const save = useSave(ctx, reload);
   const { isAdmin } = ctx;
+  const fin = ctx.canFinance;
+  // Cùng công thức với tab Lợi nhuận (doanh thu chưa VAT gồm phí quản lý, trừ hạng mục không sử dụng)
+  const pr = fin ? eventProfit(ev, data.items.filter((i) => i.event_id === ev.id), data.payments.filter((p) => p.event_id === ev.id)) : null;
   const [f, setF] = useState(ev);
   const set = (k) => (e) => setF({ ...f, [k]: e.target.value });
   const pm = data.members.find((m) => m.id === ev.pm_id);
@@ -269,10 +279,10 @@ function Overview({ ctx, ev, data, h, reload }) {
   return html`<div class="form">
     <div class="kpis">
       <div class="kpi info"><b>${h.pct}%</b><span>Checklist (${h.done}/${h.tasks})${h.overdue ? ` · ${h.overdue} quá hạn` : ''}</span></div>
-      ${isAdmin && html`<div class="kpi"><b>${money(ev.quote_total)}</b><span>Giá trị báo giá${h.extras ? ` + phát sinh ${money(h.extras)}` : ''}</span></div>
+      ${fin && html`<div class="kpi"><b>${money(ev.quote_total)}</b><span>Giá trị báo giá${h.extras ? ` + phát sinh ${money(h.extras)}` : ''}</span></div>
         <div class="kpi good"><b>${money(h.paidIn)}</b><span>Khách đã trả / ${money(h.dueIn)}</span></div>
         <div class="kpi warn"><b>${money(h.paidOut)}</b><span>Đã trả NCC / ${money(h.cost)}</span></div>
-        ${h.cost > 0 && html`<div class="kpi"><b>${money((ev.quote_subtotal || h.contract) + h.extras - h.cost)}</b><span>Lãi gộp ước tính (chưa VAT)</span></div>`}`}
+        ${h.cost > 0 && html`<div class=${'kpi ' + (pr.margin < 0.25 ? 'warn' : 'good')}><b>${money(pr.gross)}</b><span>Lãi gộp ước tính (chưa VAT) · biên ${pct(pr.margin)}</span></div>`}`}
     </div>
     <p><a class="btn" href=${CHECKLIST_URL} target="_blank" rel="noopener">📋 Mở checklist giải trong Fairplay Checklist ↗</a></p>
     ${isAdmin ? html`<div class="grid2">
@@ -556,5 +566,199 @@ function Suppliers({ ctx, data, reload }) {
         <div class="row end"><button type="button" class="btn" onClick=${() => setF(null)}>Huỷ</button><button class="btn primary">Lưu</button></div>
       </form>
     </${Modal}>`}
+  </div>`;
+}
+
+// ---------------------------------------------------------------------------
+// Lợi nhuận: nhập file nghiệm thu + tab Lợi nhuận (chỉ người có quyền tài chính)
+// ---------------------------------------------------------------------------
+const pct = (v) => (v == null || !Number.isFinite(v) ? '-' : (v * 100).toFixed(1).replace('.', ',') + '%');
+const ACTION = { update: 'Khớp', create: 'Tạo phát sinh mới', unused: 'Không sử dụng' };
+
+// Mô phỏng trạng thái hạng mục sau khi lưu (để xem trước lãi đúng như sẽ lưu)
+function applyAcceptance(evItems, res, manual, leftUnused) {
+  const out = evItems.map((it) => ({ ...it }));
+  const byId = Object.fromEntries(out.map((it) => [it.id, it]));
+  const fill = (it, a) => Object.assign(it, { section: it.section || a.group || null, cost_amount: a.cost ?? null, accept_unit_cost: a.unit_cost ?? null, accept_amount: a.amount ?? null, accept_qty: a.qty ?? null, accept_status: 'ok' });
+  const neu = (a, extra) => ({ id: uuid(), section: a.group, name: a.name, detail: a.detail || null, qty: a.qty, unit: a.unit || null, unit_price: a.unit_price, amount: a.amount,
+    accept_amount: a.amount, accept_qty: a.qty, cost_amount: a.cost ?? null, accept_unit_cost: a.unit_cost ?? null, is_extra: extra, chosen: true, accept_status: 'ok', note: a.note || null, _new: true });
+  for (const m of res.matches) {
+    if (m.action === 'update') fill(byId[m.item.id], m.acc);
+    else if (m.action === 'unused') Object.assign(byId[m.item.id], { not_used: true, accept_note: 'Không sử dụng (theo nghiệm thu)' });
+    else if (m.action === 'create') out.push(neu(m.acc, true));
+  }
+  res.unmatched.forEach((a, i) => {
+    const c = manual[i] || 'skip';
+    if (c === 'create') out.push(neu(a, a.groupKind === 'extra'));
+    else if (c !== 'skip' && byId[c]) a.groupKind === 'unused' ? Object.assign(byId[c], { not_used: true }) : fill(byId[c], a);
+  });
+  for (const id of leftUnused) if (byId[id]) byId[id].not_used = true;
+  return out;
+}
+
+function ImportAcceptance({ ctx, ev, data, onClose, onDone }) {
+  const sb = ctx.store.sb;
+  const evItems = data.items.filter((i) => i.event_id === ev.id);
+  const [file, setFile] = useState(null);
+  const [acc, setAcc] = useState(null);
+  const [res, setRes] = useState(null);
+  const [manual, setManual] = useState({});
+  const [leftUnused, setLeftUnused] = useState([]);
+  const [err, setErr] = useState('');
+  const [busy, setBusy] = useState('');
+
+  async function onFile(e) {
+    const f = e.target.files[0];
+    if (!f) return;
+    setErr('');
+    try {
+      const XLSX = await loadXlsx();
+      const wb = XLSX.read(await f.arrayBuffer());
+      const parsed = wb.SheetNames.map((name) => parseAcceptance(XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: null }))).find((a) => a && a.items.length);
+      if (!parsed) return setErr('Không đọc được file. Cần đúng mẫu nghiệm thu Fairplay (cột STT, Nội dung, Bao gồm, Số lượng, ĐVT, Đơn Giá, Thành tiền, Cost phải trả nhà cung cấp).');
+      setFile(f);
+      setAcc(parsed);
+      setRes(matchAcceptance(parsed.items, evItems));
+      setManual({});
+      setLeftUnused([]);
+    } catch (x) {
+      setErr('Không đọc được file: ' + x.message);
+    }
+  }
+
+  const rates = acc ? { ...ev, fee_rate: acc.fee_rate ?? ev.fee_rate, vat_rate: acc.vat_rate ?? ev.vat_rate } : ev;
+  const after = res ? applyAcceptance(evItems, res, manual, leftUnused) : [];
+  const pv = res ? eventProfit(rates, after) : null;
+  const fileRev = acc?.totals?.revenue;
+  const usedIds = new Set(res ? res.matches.filter((m) => m.item).map((m) => m.item.id) : []);
+  const pickable = evItems.filter((it) => !usedIds.has(it.id));
+
+  async function save() {
+    setErr('');
+    try {
+      const before = Object.fromEntries(evItems.map((it) => [it.id, it]));
+      const COLS = ['section', 'cost_amount', 'accept_unit_cost', 'accept_amount', 'accept_qty', 'accept_status', 'not_used', 'accept_note'];
+      let i = 0;
+      for (const it of after) {
+        i++;
+        setBusy(`Đang lưu ${i}/${after.length}…`);
+        if (it._new) {
+          const { _new, ...row } = it;
+          ok(await sb.from('ev_items').insert({ ...row, event_id: ev.id, extra_date: row.is_extra ? today() : null, sort: (row.is_extra ? 9000 : 8500) + i }));
+          continue;
+        }
+        const old = before[it.id];
+        const patch = {};
+        for (const k of COLS) if ((it[k] ?? null) !== (old[k] ?? null)) patch[k] = it[k] ?? null;
+        if (Object.keys(patch).length) ok(await sb.from('ev_items').update(patch).eq('id', it.id));
+      }
+      setBusy('Đang lưu tỉ lệ phí, VAT…');
+      ok(await sb.from('ev_events').update({ fee_rate: rates.fee_rate ?? null, vat_rate: rates.vat_rate ?? null, acceptance_imported_at: new Date().toISOString() }).eq('id', ev.id));
+      setBusy('Đang lưu file gốc vào Hồ sơ…');
+      const path = `${ev.id}/${Date.now()}-${file.name.replace(/[^\w.\-]+/g, '_')}`;
+      const up = await sb.storage.from('ev-files').upload(path, file);
+      if (!up.error) await sb.from('ev_files').insert({ event_id: ev.id, kind: 'acceptance', name: file.name, path, size: file.size });
+      ctx.notify(up.error ? 'Đã lưu nghiệm thu (chưa lưu được file gốc: ' + up.error.message + ')' : 'Đã lưu nghiệm thu và file gốc');
+      onDone();
+    } catch (x) {
+      setErr(x.message);
+    }
+    setBusy('');
+  }
+
+  const cnt = (a) => (res ? res.matches.filter((m) => m.action === a).length : 0);
+  return html`<${Modal} title=${'Nhập file nghiệm thu - ' + ev.name} onClose=${onClose} wide>
+    <div class="form">
+      <p class="muted">Chọn file nghiệm thu Excel (mẫu Fairplay). CRM khớp từng dòng với hạng mục của giải, điền giá nhập (chi phí NCC), số lượng và thành tiền theo nghiệm thu. Chỉ lưu khi bấm xác nhận.</p>
+      <input type="file" accept=".xlsx,.xls" onChange=${onFile} />
+      ${err && html`<div class="err">${err}</div>`}
+      ${res && html`
+        <div class="kpis">
+          <div class="kpi info"><b>${money(pv.revenue)}</b><span>Doanh thu chưa VAT${fileRev != null ? (Math.round(pv.revenue) === Math.round(fileRev) ? ' · khớp số tổng trong file' : ` · file ghi ${money(fileRev)}`) : ''}</span></div>
+          <div class="kpi warn"><b>${money(pv.cost)}</b><span>Chi phí NCC</span></div>
+          <div class=${'kpi ' + (pv.margin < 0.25 ? 'bad' : 'good')}><b>${money(pv.gross)}</b><span>Lãi gộp · biên ${pct(pv.margin)}</span></div>
+        </div>
+        ${fileRev != null && Math.round(pv.revenue) !== Math.round(fileRev) && html`<p class="note">Doanh thu tính ra khác số tổng trong file ${money(Math.abs(pv.revenue - fileRev))}. Kiểm tra các dòng "Không khớp được" và hạng mục báo giá không có trong nghiệm thu bên dưới.</p>`}
+        <p><b>${cnt('update')}</b> dòng khớp · <b>${cnt('create')}</b> phát sinh tạo mới · <b>${cnt('unused')}</b> không sử dụng · <b>${res.unmatched.length}</b> không khớp được · phí quản lý ${pct(rates.fee_rate ?? DEFAULTS.fee_rate)}, VAT ${pct(rates.vat_rate ?? DEFAULTS.vat_rate)}</p>
+        ${res.unmatched.length > 0 && html`<div class="card-sec"><h3>Không khớp được - chọn hạng mục tương ứng</h3>
+          <div class="table-wrap"><table class="table compact"><thead><tr><th>Dòng nghiệm thu</th><th class="num">Thành tiền</th><th class="num">Chi phí NCC</th><th>Xử lý</th></tr></thead>
+          <tbody>${res.unmatched.map((a, i) => html`<tr key=${i}><td><b>${a.name}</b> <span class="muted small">(${a.groupKind === 'unused' ? 'không sử dụng' : a.group})</span><div class="muted small clamp">${a.detail}</div></td>
+            <td class="num">${money(a.amount)}</td><td class="num">${money(a.cost)}</td>
+            <td><select value=${manual[i] || 'skip'} onChange=${(e) => setManual({ ...manual, [i]: e.target.value })}>
+              <option value="skip">Bỏ qua</option>
+              ${a.groupKind !== 'unused' && html`<option value="create">Tạo hạng mục mới${a.groupKind === 'extra' ? ' (phát sinh)' : ''}</option>`}
+              ${pickable.map((it) => html`<option value=${it.id}>${a.groupKind === 'unused' ? 'Đánh dấu không dùng: ' : '= '}${it.name}${it.detail ? ' - ' + it.detail.slice(0, 30) : ''} (${money(it.amount)})</option>`)}
+            </select></td></tr>`)}</tbody></table></div></div>`}
+        ${res.leftover.length > 0 && html`<div class="card-sec"><h3>Có trong báo giá nhưng không có trong file nghiệm thu (${res.leftover.length})</h3>
+          <p class="muted small">Những hạng mục này vẫn được tính doanh thu theo báo giá. Tick nếu thực tế không sử dụng.</p>
+          ${res.leftover.map((it) => html`<label class="inline-check" key=${it.id}><input type="checkbox" checked=${leftUnused.includes(it.id)} onChange=${(e) => setLeftUnused(e.target.checked ? [...leftUnused, it.id] : leftUnused.filter((x) => x !== it.id))} /> ${it.name} (${money(it.amount)})</label>`)}</div>`}
+        <details><summary>Xem ${res.matches.length} dòng đã khớp / tạo mới</summary>
+          <div class="table-wrap"><table class="table compact"><thead><tr><th>Dòng nghiệm thu</th><th>Hạng mục trong CRM</th><th class="num">Thành tiền</th><th class="num">Chi phí NCC</th><th>Xử lý</th></tr></thead>
+          <tbody>${res.matches.map((m, i) => html`<tr key=${i}><td>${m.acc.name}<div class="muted small clamp">${m.acc.detail}</div></td><td>${m.item ? m.item.name : '-'}</td>
+            <td class="num">${money(m.acc.amount)}</td><td class="num">${money(m.acc.cost)}</td><td><span class=${'badge ' + (m.action === 'create' ? 'warn' : m.action === 'unused' ? '' : 'ok')}>${ACTION[m.action]}</span></td></tr>`)}</tbody></table></div>
+        </details>
+        <div class="row end"><button class="btn" onClick=${onClose}>Huỷ</button><button class="btn primary" disabled=${!!busy} onClick=${save}>${busy || 'Xác nhận lưu nghiệm thu'}</button></div>`}
+    </div>
+  </${Modal}>`;
+}
+
+function ProfitTab({ ctx, ev, data, reload, onImport }) {
+  const save = useSave(ctx, reload);
+  const { isAdmin } = ctx;
+  const items = data.items.filter((i) => i.event_id === ev.id);
+  const p = eventProfit(ev, items, data.payments.filter((x) => x.event_id === ev.id));
+  const [showItems, setShowItems] = useState(false);
+  const pctIn = (v, key) => {
+    const n = Number(String(v).replace(',', '.'));
+    if (v === '' || !Number.isFinite(n)) return save('ev_events', ev.id, { [key]: null });
+    save('ev_events', ev.id, { [key]: n / 100 }, 'Đã lưu');
+  };
+  const act = items.filter((i) => i.chosen !== false);
+  return html`<div class="form">
+    ${!ev.acceptance_imported_at && html`<p class="note">Chưa nhập file nghiệm thu: số liệu đang tính theo báo giá và giá nhập đã điền tay.${isAdmin ? html` <button class="btn sm" onClick=${onImport}>⬆ Nhập file nghiệm thu</button>` : ''}</p>`}
+    ${p.warn.map((w) => html`<div class="err">⚠ ${w}</div>`)}
+    ${p.missingCost > 0 && html`<p class="note">${p.missingCost} hạng mục chưa có giá nhập (chi phí NCC). Hạng mục Fairplay tự làm hoặc được ưu đãi thì nhập 0.</p>`}
+    <div class="kpis">
+      <div class="kpi info"><b>${money(p.revenue)}</b><span>Doanh thu chưa VAT (gồm phí quản lý ${pct(p.feeRate)})</span></div>
+      <div class="kpi"><b>${money(p.vat)}</b><span>VAT ${pct(p.vatRate)} (thu hộ, không tính vào doanh thu)</span></div>
+      <div class="kpi"><b>${money(p.total)}</b><span>Tổng khách trả · đã thu ${money(p.paid)}</span></div>
+      <div class="kpi warn"><b>${money(p.cost)}</b><span>Chi phí NCC</span></div>
+      ${ev.pit_on && html`<div class="kpi warn"><b>${money(p.pit)}</b><span>Thuế TNCN công ty chịu thay CTV</span></div>`}
+      <div class=${'kpi ' + (p.margin < 0.25 ? 'bad' : 'good')}><b>${money(p.gross)}</b><span>Lãi gộp · biên ${pct(p.margin)}</span></div>
+      <div class="kpi"><b>${pct(p.markup)}</b><span>Markup (lãi / chi phí), chỉ để so sánh</span></div>
+    </div>
+    <div class="table-wrap"><table class="table compact">
+      <thead><tr><th>Nhóm hạng mục</th><th class="num">Doanh thu</th><th class="num">Chi phí NCC</th><th class="num">Lãi</th><th class="num">Biên lãi</th></tr></thead>
+      <tbody>${p.groups.map((g) => html`<tr key=${g.name}><td><b>${g.name}</b>${g.extra && html` <span class="badge warn">Phát sinh</span>`}</td><td class="num">${money(g.revenue)}</td><td class="num">${money(g.cost)}</td>
+          <td class="num">${money(g.profit)}</td><td class="num"><span class=${'badge ' + (g.margin < 0.25 ? 'bad' : 'ok')}>${pct(g.margin)}</span></td></tr>`)}
+        <tr><td><b>Tổng hạng mục</b></td><td class="num"><b>${money(p.itemsSum)}</b></td><td class="num"><b>${money(p.cost)}</b></td><td class="num"><b>${money(p.itemsSum - p.cost)}</b></td><td></td></tr>
+        <tr><td>Phí quản lý ${pct(p.feeRate)}</td><td class="num">${money(p.fee)}</td><td></td><td class="num">${money(p.fee)}</td><td></td></tr>
+      </tbody></table></div>
+    ${isAdmin && html`<fieldset class="fs"><legend>Thiết lập của giải</legend>
+      <div class="grid3">
+        <label>Phí quản lý (%)<input type="number" step="0.1" value=${ev.fee_rate != null ? +(ev.fee_rate * 100).toFixed(2) : ''} placeholder=${+(p.feeRate * 100).toFixed(2)} onChange=${(e) => pctIn(e.target.value, 'fee_rate')} /></label>
+        <label>VAT (%)<input type="number" step="0.1" value=${ev.vat_rate != null ? +(ev.vat_rate * 100).toFixed(2) : ''} placeholder=${+(p.vatRate * 100).toFixed(2)} onChange=${(e) => pctIn(e.target.value, 'vat_rate')} /></label>
+        <label class="inline-check"><input type="checkbox" checked=${!!ev.pit_on} onChange=${(e) => save('ev_events', ev.id, { pit_on: e.target.checked }, 'Đã lưu')} /> Công ty chịu thuế TNCN thay CTV</label>
+      </div>
+      ${ev.pit_on && html`<div class="grid3">
+        <label>Thuế suất TNCN (%)<input type="number" step="0.1" value=${ev.pit_rate != null ? +(ev.pit_rate * 100).toFixed(2) : ''} placeholder=${DEFAULTS.pit_rate * 100} onChange=${(e) => pctIn(e.target.value, 'pit_rate')} /></label>
+        <label>Ngưỡng khấu trừ mỗi lần trả / người (đ)<input type="number" value=${ev.pit_threshold ?? ''} placeholder=${DEFAULTS.pit_threshold} onChange=${(e) => save('ev_events', ev.id, { pit_threshold: n(e.target.value) })} /></label>
+      </div><p class="muted small">Thuế chỉ tính cho hạng mục có Loại NCC = "Cá nhân (CTV)" và đơn giá trả từ ngưỡng trở lên. Chọn Loại NCC ở bảng hạng mục bên dưới. Cần kế toán xác nhận.</p>`}
+    </fieldset>`}
+    <button class="link" onClick=${() => setShowItems(!showItems)}>${showItems ? 'Ẩn' : 'Xem'} lãi từng hạng mục (${act.length})</button>
+    ${showItems && html`<div class="table-wrap"><table class="table compact">
+      <thead><tr><th>Hạng mục</th><th class="num">Thành tiền</th><th class="num">Chi phí NCC</th><th class="num">Lãi</th><th>Loại NCC</th><th>Không dùng</th></tr></thead>
+      <tbody>${act.map((it) => {
+        const rev = Number(it.accept_amount ?? it.amount) || 0;
+        const cost = it.cost_amount;
+        return html`<tr key=${it.id} class=${it.not_used ? 'muted' : ''}><td><b>${it.name}</b>${it.is_extra && html` <span class="badge warn">Phát sinh</span>`}<div class="muted small clamp">${it.detail || ''}</div></td>
+          <td class="num">${money(rev)}${it.accept_amount != null && Number(it.accept_amount) !== Number(it.amount) && html`<div class="muted small">báo giá ${money(it.amount)}</div>`}</td>
+          <td class="num">${cost == null ? html`<span class="stale small">chưa có</span>` : money(cost)}</td>
+          <td class="num">${cost == null ? '-' : money(rev - cost)}</td>
+          <td>${isAdmin ? html`<select value=${it.payee_type || ''} onChange=${(e) => save('ev_items', it.id, { payee_type: e.target.value || null })}><option value="">-</option>${Object.entries(PAYEE).map(([k, l]) => html`<option value=${k}>${l}</option>`)}</select>` : PAYEE[it.payee_type] || '-'}</td>
+          <td>${isAdmin ? html`<input type="checkbox" checked=${!!it.not_used} onChange=${(e) => save('ev_items', it.id, { not_used: e.target.checked })} />` : it.not_used ? '✓' : ''}</td>
+        </tr>`;
+      })}</tbody></table></div>`}
+    <p class="muted small">Doanh thu chưa VAT = tổng thành tiền hạng mục (theo nghiệm thu nếu có, kể cả phát sinh, trừ hạng mục không sử dụng) + phí quản lý. Lãi gộp = doanh thu chưa VAT - chi phí NCC${ev.pit_on ? ' - thuế TNCN công ty chịu thay CTV' : ''}. Chi phí 0 là hạng mục Fairplay tự làm hoặc được ưu đãi.</p>
   </div>`;
 }
