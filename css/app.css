@@ -280,6 +280,7 @@ td.num.good { color: var(--ok); font-weight: 600; }
 
 /* Khách hàng & chăm sóc */
 .btn.sm { padding: 4px 10px; font-size: 12.5px; }
+.btn.danger { color: var(--bad); border-color: var(--bad-bg); background: var(--bad-bg); }
 .suggest { background: #fff6e6; border: 1px solid #ffd59a; color: #7a3e00; padding: 8px 12px; border-radius: 8px; font-size: 13px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
 .suggest .btn { margin-left: auto; }
 .minilist { display: grid; gap: 6px; }

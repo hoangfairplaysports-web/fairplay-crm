@@ -3,6 +3,7 @@ import { html, useState, useEffect } from 'https://cdn.jsdelivr.net/npm/htm@3.1.
 import { money } from './ev-core.js';
 import { eventProfit, monthProfit, fixedCosts, FIXED_DEFAULTS } from './finance-core.js';
 import * as U from './util.js';
+import { ImportPastEvent, canDeleteEvent, deleteEvent } from './past-import.js';
 
 const ok = ({ data, error }) => {
   if (error) throw new Error(/row-level security|permission/i.test(error.message) ? 'Bạn không có quyền xem số liệu tài chính' : error.message);
@@ -26,6 +27,7 @@ export function ProfitView({ ctx }) {
   const [f, setF] = useState(null);
   const [dirty, setDirty] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [importing, setImporting] = useState(false);
 
   async function load() {
     try {
@@ -93,6 +95,17 @@ export function ProfitView({ ctx }) {
     fixed: m === month ? fc.total : data.months[m] ? fixedCosts(data.months[m]).total : null,
   }));
 
+  async function removeEvent(e) {
+    if (!confirm(`Xoá giải "${e.name}" cùng toàn bộ hạng mục, thanh toán, checklist và hồ sơ? Không khôi phục được.`)) return;
+    try {
+      await deleteEvent(ctx, e);
+      ctx.notify('Đã xoá giải');
+      load();
+    } catch (x) {
+      ctx.notify(x.message, 'err');
+    }
+  }
+
   return html`<div class="page wide">
     <div class="page-head">
       <div><h1>💰 Lợi nhuận tháng</h1><div class="muted">Lãi gộp các giải trong tháng (theo ngày tổ chức) trừ chi phí cố định. Chỉ người có quyền tài chính thấy trang này.</div></div>
@@ -100,6 +113,7 @@ export function ProfitView({ ctx }) {
         <button class="btn" onClick=${() => setMonth(shiftMonth(month, -1))}>‹</button>
         <input type="month" value=${month} onInput=${(e) => e.target.value && setMonth(e.target.value)} />
         <button class="btn" onClick=${() => setMonth(shiftMonth(month, 1))}>›</button>
+        ${ctx.canEditMoney && html`<button class="btn primary" onClick=${() => setImporting(true)}>＋ Nhập giải đã triển khai</button>`}
       </div>
     </div>
     ${data.error && html`<div class="err">${data.error}</div>`}
@@ -118,14 +132,15 @@ export function ProfitView({ ctx }) {
     <section class="section card-sec">
       <h2>Các giải trong tháng ${label(month)}</h2>
       ${rows.length ? html`<div class="table-wrap"><table class="table compact">
-        <thead><tr><th>Giải</th><th>Ngày</th><th class="num">Doanh thu chưa VAT</th><th class="num">Chi phí NCC</th><th class="num">Lãi gộp</th><th class="num">Biên lãi</th><th class="num">Khách còn nợ</th></tr></thead>
+        <thead><tr><th>Giải</th><th>Ngày</th><th class="num">Doanh thu chưa VAT</th><th class="num">Chi phí NCC</th><th class="num">Lãi gộp</th><th class="num">Biên lãi</th><th class="num">Khách còn nợ</th><th></th></tr></thead>
         <tbody>${rows.map(({ e, p }) => html`<tr key=${e.id}>
           <td><b>${e.name}</b>${!e.acceptance_imported_at && html` <span class="badge warn" title="Số liệu theo báo giá + giá nhập nhập tay">chưa nghiệm thu</span>`}${p.missingCost > 0 && html` <span class="badge bad">${p.missingCost} mục thiếu giá nhập</span>`}</td>
           <td class="nowrap">${U.fmtDate(e.event_date)}</td>
           <td class="num">${money(p.revenue)}</td><td class="num">${money(p.cost + p.pit)}</td><td class="num">${money(p.gross)}</td>
           <td class="num"><span class=${'badge ' + (p.margin < 0.25 ? 'bad' : 'ok')}>${pct(p.margin)}</span></td>
-          <td class="num">${p.owed > 0.5 ? money(p.owed) : html`<span class="muted">0đ</span>`}</td></tr>`)}
-          <tr><td><b>Tổng</b></td><td></td><td class="num"><b>${money(r.revenue)}</b></td><td class="num"><b>${money(rows.reduce((a, x) => a + x.p.cost + x.p.pit, 0))}</b></td><td class="num"><b>${money(r.gross)}</b></td><td class="num"><b>${pct(r.avgMargin)}</b></td><td class="num"><b>${money(rows.reduce((a, x) => a + Math.max(0, x.p.owed), 0))}</b></td></tr>
+          <td class="num">${p.owed > 0.5 ? money(p.owed) : html`<span class="muted">0đ</span>`}</td>
+          <td>${canDeleteEvent(ctx, e) && html`<button class="link danger small" title="Xoá giải" onClick=${() => removeEvent(e)}>Xoá</button>`}</td></tr>`)}
+          <tr><td><b>Tổng</b></td><td></td><td class="num"><b>${money(r.revenue)}</b></td><td class="num"><b>${money(rows.reduce((a, x) => a + x.p.cost + x.p.pit, 0))}</b></td><td class="num"><b>${money(r.gross)}</b></td><td class="num"><b>${pct(r.avgMargin)}</b></td><td class="num"><b>${money(rows.reduce((a, x) => a + Math.max(0, x.p.owed), 0))}</b></td><td></td></tr>
         </tbody></table></div>` : html`<div class="empty">Không có giải nào có ngày tổ chức trong tháng ${label(month)}.</div>`}
     </section>
 
@@ -164,6 +179,7 @@ export function ProfitView({ ctx }) {
       <h2>12 tháng gần nhất: lãi gộp và chi phí cố định</h2>
       <${Chart12} series=${series} current=${month} />
     </section>
+    ${importing && html`<${ImportPastEvent} ctx=${ctx} onClose=${() => setImporting(false)} onDone=${async (m) => { setImporting(false); await load(); if (m) setMonth(m); }} />`}
   </div>`;
 }
 

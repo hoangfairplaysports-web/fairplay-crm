@@ -6,6 +6,7 @@ import { Modal } from './ui.js';
 import * as U from './util.js';
 import { parseQuote, generateChecklist, tasksForItem, defaultPayments, eventHealth, money, addDays, PHASES, fold } from './ev-core.js';
 import { parseAcceptance, matchAcceptance, acceptanceItems, eventProfit, PAYEE, DEFAULTS } from './finance-core.js';
+import { canDeleteEvent, deleteEvent } from './past-import.js';
 
 const CHECKLIST_URL = 'https://hoangfairplaysports-web.github.io/fairplay-checklist/#events';
 const EV_STATUS = { preparing: 'Đang chuẩn bị', running: 'Đang diễn ra', done: 'Đã xong', cancelled: 'Đã huỷ' };
@@ -237,7 +238,11 @@ function DeployDrawer({ ctx, ev, data, reload, onClose }) {
     <aside class="drawer wide-drawer">
       <div class="drawer-head"><div><h2>${ev.name}</h2><div class="muted">${[ev.client_name, ev.venue, ev.event_date && U.fmtDate(ev.event_date)].filter(Boolean).join(' · ')}</div>
         <div class="row" style="margin-top:6px">${h.warn.map((w) => html`<span class="badge bad">${w}</span>`)}
-          ${ctx.canEditMoney && html`<button class="btn sm" onClick=${() => setImportAcc(true)}>⬆ Nhập file nghiệm thu</button>`}</div></div>
+          ${ctx.canEditMoney && html`<button class="btn sm" onClick=${() => setImportAcc(true)}>⬆ Nhập file nghiệm thu</button>`}
+          ${canDeleteEvent(ctx, ev) && html`<button class="btn sm danger" onClick=${async () => {
+            if (!confirm(`Xoá giải "${ev.name}" cùng toàn bộ hạng mục, thanh toán, checklist và hồ sơ? Không khôi phục được.`)) return;
+            try { await deleteEvent(ctx, ev); ctx.notify('Đã xoá giải'); onClose(); reload(); } catch (x) { ctx.notify(x.message, 'err'); }
+          }}>🗑 Xoá giải</button>`}</div></div>
         <button class="x" onClick=${onClose}>×</button></div>
       <div class="seg" style="margin:0 18px">${TABS.map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
       <div class="drawer-body">
