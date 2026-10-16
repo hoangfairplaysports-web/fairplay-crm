@@ -89,5 +89,9 @@ drop trigger if exists ev_events_accountant_guard on public.ev_events;
 create trigger ev_events_accountant_guard before update on public.ev_events
   for each row execute function public.ev_events_accountant_guard();
 
+-- 5. Thêm phát sinh / chọn Option sẽ tự sinh việc checklist → Kế toán được THÊM việc (không sửa / xoá)
+drop policy if exists ev_tasks_fin_insert on public.ev_tasks;
+create policy ev_tasks_fin_insert on public.ev_tasks for insert to authenticated with check (public.can_edit_finance());
+
 -- Kiểm tra sau khi chạy:
 --   select full_name, role, finance_access from public.profiles order by role;
