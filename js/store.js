@@ -360,6 +360,7 @@ function seed() {
     P('vu', 'Vũ', 'sales'),
     P('trang', 'Trang', 'sales'),
     P('hieu', 'Hiếu', 'sales'),
+    { ...P('ketoan', 'Kế toán Lan', 'accountant'), finance_access: true },
   ];
   const ago = (days, h = 9) => {
     const d = new Date();

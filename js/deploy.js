@@ -237,7 +237,7 @@ function DeployDrawer({ ctx, ev, data, reload, onClose }) {
     <aside class="drawer wide-drawer">
       <div class="drawer-head"><div><h2>${ev.name}</h2><div class="muted">${[ev.client_name, ev.venue, ev.event_date && U.fmtDate(ev.event_date)].filter(Boolean).join(' · ')}</div>
         <div class="row" style="margin-top:6px">${h.warn.map((w) => html`<span class="badge bad">${w}</span>`)}
-          ${isAdmin && fin && html`<button class="btn sm" onClick=${() => setImportAcc(true)}>⬆ Nhập file nghiệm thu</button>`}</div></div>
+          ${ctx.canEditMoney && html`<button class="btn sm" onClick=${() => setImportAcc(true)}>⬆ Nhập file nghiệm thu</button>`}</div></div>
         <button class="x" onClick=${onClose}>×</button></div>
       <div class="seg" style="margin:0 18px">${TABS.map(([k, l]) => html`<button class=${tab === k ? 'on' : ''} onClick=${() => setTab(k)}>${l}</button>`)}</div>
       <div class="drawer-body">
@@ -704,7 +704,7 @@ function ImportAcceptance({ ctx, ev, data, onClose, onDone }) {
 
 function ProfitTab({ ctx, ev, data, reload, onImport }) {
   const save = useSave(ctx, reload);
-  const { isAdmin } = ctx;
+  const isAdmin = ctx.canEditMoney; // Admin hoặc Kế toán
   const items = data.items.filter((i) => i.event_id === ev.id);
   const p = eventProfit(ev, items, data.payments.filter((x) => x.event_id === ev.id));
   const [showItems, setShowItems] = useState(false);

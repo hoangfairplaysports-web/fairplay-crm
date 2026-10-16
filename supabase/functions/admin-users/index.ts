@@ -37,7 +37,7 @@ Deno.serve(async (req) => {
     const email = String(body.email ?? '').trim().toLowerCase();
     const password = String(body.password ?? '');
     const full_name = String(body.full_name ?? '').trim();
-    const role = ['admin', 'manager', 'sales'].includes(body.role) ? body.role : 'sales';
+    const role = ['admin', 'manager', 'sales', 'accountant'].includes(body.role) ? body.role : 'sales';
     if (!/^\S+@\S+\.\S+$/.test(email)) return json({ error: 'Email không hợp lệ' }, 400);
     if (password.length < 8) return json({ error: 'Mật khẩu tạm tối thiểu 8 ký tự' }, 400);
     if (!full_name) return json({ error: 'Nhập họ tên' }, 400);

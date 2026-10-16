@@ -99,6 +99,8 @@ function App() {
   const isAdmin = user.role === 'admin';
   // Quyền tài chính (tiền, giá nhập, lợi nhuận): cột profiles.finance_access; chưa chạy migration 03 thì theo Admin như cũ
   const canFinance = user.finance_access ?? isAdmin;
+  // Nhập / sửa số tiền: Admin hoặc Kế toán
+  const canEditMoney = canFinance && (isAdmin || user.role === 'accountant');
   const people = Object.fromEntries(profiles.map((p) => [p.id, p]));
   const go = (v, preset) => {
     setListPreset(preset || null);
@@ -200,7 +202,7 @@ function App() {
   }
 
   const ctx = {
-    user, isMgr, isAdmin, canFinance, profiles, people, leads: leads || [], settings, notify, go, listPreset,
+    user, isMgr, isAdmin, canFinance, canEditMoney, profiles, people, leads: leads || [], settings, notify, go, listPreset,
     openLead: setOpenLeadId, updateLead, logActivity, createLead, bulkAssign, bulkStage, deleteLead, reload,
     setSettings, setProfiles, store,
     customers, contacts, events, gifts, saveRow, removeRow, logCare,
@@ -956,7 +958,7 @@ function SettingsView({ ctx }) {
     <div class="page-head"><h1>Cài đặt</h1></div>
     <section class="section card-sec">
       <h2>Thành viên & phân quyền</h2>
-      <p class="muted small"><b>Admin</b>: toàn quyền, cài đặt. <b>Trưởng KD</b>: giao lead, xoá lead, xem báo cáo đội. <b>Sale</b>: xem/sửa mọi lead, ghi tương tác; lead do sale tạo vào hàng chờ.
+      <p class="muted small"><b>Admin</b>: toàn quyền, cài đặt. <b>Trưởng KD</b>: giao lead, xoá lead, xem báo cáo đội. <b>Sale</b>: xem/sửa mọi lead, ghi tương tác; lead do sale tạo vào hàng chờ. <b>Kế toán</b>: xem toàn bộ số tiền, lợi nhuận và nhập / sửa thu chi, giá nhập, nghiệm thu, chi phí tháng (không vào Cài đặt, không tạo / xoá giải).
         Cột <b>Dùng CRM</b>: tài khoản tạo bên Fairplay Checklist mặc định chỉ dùng Checklist — tick để cho họ vào CRM (không cần tạo tài khoản mới).</p>
       <div class="table-wrap"><table class="table compact">
         <thead><tr><th>Họ tên</th><th>Email</th><th>Vai trò</th><th>Dùng CRM</th><th>Hoạt động</th><th></th></tr></thead>
