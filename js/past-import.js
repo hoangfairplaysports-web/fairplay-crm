@@ -27,11 +27,15 @@ export function readPastFile(sheets, fileName) {
     } catch {
       acc = null;
     }
-    if (acc && acc.items.length && acc.items.some((a) => a.cost != null)) {
+    // File nghiệm thu: có cột Cost NCC, hoặc có nhóm "phát sinh" / "không sử dụng", hoặc tiêu đề ghi "nghiệm thu".
+    // (Không đọc như báo giá, nếu không các dòng "Đã thanh toán", "Còn lại", số tài khoản bị tính thành hạng mục.)
+    const head = s.rows.slice(0, 20).flat().filter((c) => typeof c === 'string').map(fold).join(' ');
+    const accLike = acc && acc.items.length && (acc.items.some((a) => a.cost != null) || acc.items.some((a) => a.groupKind !== 'contract') || /nghiem thu|quyet toan/.test(head));
+    if (accLike) {
       const items = acceptanceItems(acc);
       const draft = { fee_rate: acc.fee_rate, vat_rate: acc.vat_rate };
       const p = eventProfit(draft, items, []);
-      out.push({ mode: 'acc', sheet: s.name, acc, items, total: acc.totals.total || p.total, revenue: p.revenue, cost: p.cost });
+      out.push({ mode: 'acc', sheet: s.name, acc, items, total: acc.totals.total || p.total, revenue: p.revenue, cost: p.cost, noCost: !items.some((a) => a.cost != null) });
     } else rest.push(s);
   }
   if (rest.length) {
@@ -150,7 +154,9 @@ export function ImportPastEvent({ ctx, onClose, onDone }) {
         const x = list[i];
         return html`<fieldset class="fs" key=${i}>
           <legend><label class="inline-check"><input type="checkbox" checked=${f.include} onChange=${(e) => upd(i, { include: e.target.checked })} />
-            Sheet "${x.sheet}" - ${x.mode === 'acc' ? 'file nghiệm thu' : 'báo giá'} · ${x.items.length} hạng mục · khách trả ${money(x.total)}${x.mode === 'acc' ? ` · chi phí NCC ${money(x.cost)}` : ''}</label></legend>
+            Sheet "${x.sheet}" - ${x.mode === 'acc' ? 'file nghiệm thu' : 'báo giá'} · ${x.items.length} hạng mục · khách trả ${money(x.total)}${x.mode === 'acc' && !x.noCost ? ` · chi phí NCC ${money(x.cost)}` : ''}</label></legend>
+          ${x.noCost && html`<p class="note">File này không có cột "Cost phải trả nhà cung cấp" nên chưa tính được lãi. Nên dùng bản nghiệm thu có cột Cost, hoặc điền giá nhập sau ở tab Hạng mục & NCC.</p>`}
+          ${x.mode === 'acc' && x.acc.totals.paid ? html`<p class="muted small">File ghi khách đã thanh toán ${money(x.acc.totals.paid)}${x.acc.totals.remaining ? `, còn lại ${money(x.acc.totals.remaining)}` : ''}. Sửa ô "Khách đã trả" nếu khác.</p>` : ''}
           ${f.include && html`<div class="grid2">
             <label>Tên giải *<input value=${f.name} onInput=${(e) => upd(i, { name: e.target.value })} /></label>
             <label>Ngày tổ chức *<input type="date" value=${f.event_date} onInput=${(e) => upd(i, { event_date: e.target.value })} /></label>
@@ -159,7 +165,7 @@ export function ImportPastEvent({ ctx, onClose, onDone }) {
             <label>Tên khách (nếu chưa có trong CRM)<input value=${f.client_name} onInput=${(e) => upd(i, { client_name: e.target.value })} /></label>
             <label>Địa điểm<input value=${f.venue} onInput=${(e) => upd(i, { venue: e.target.value })} /></label>
             <label>Khách đã trả (đ)<input type="number" value=${f.paid} onInput=${(e) => upd(i, { paid: e.target.value })} /></label>
-            ${x.mode === 'acc' && html`<label class="inline-check"><input type="checkbox" checked=${f.supPaid} onChange=${(e) => upd(i, { supPaid: e.target.checked })} /> Đã trả đủ tiền cho nhà cung cấp</label>`}
+            ${x.mode === 'acc' && !x.noCost && html`<label class="inline-check"><input type="checkbox" checked=${f.supPaid} onChange=${(e) => upd(i, { supPaid: e.target.checked })} /> Đã trả đủ tiền cho nhà cung cấp</label>`}
           </div>`}
         </fieldset>`;
       })}

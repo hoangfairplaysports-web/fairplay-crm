@@ -351,6 +351,7 @@ tr.dim td { color: var(--muted); }
 .drawer.wide-drawer .seg { flex-wrap: wrap; }
 .table.items input, .table.items select { font-size: 12.5px; padding: 4px 6px; max-width: 150px; }
 .w-num { width: 110px; text-align: right; }
+.w-sup { width: 170px; }
 .bad-sel { border-color: var(--bad); color: var(--bad); }
 .card-sec.late { border-color: var(--bad); }
 .fs .grid2, .fs .grid3 { margin-top: 8px; }

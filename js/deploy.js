@@ -366,9 +366,24 @@ function Items({ ctx, ev, data, reload }) {
   const sb = ctx.store.sb;
   const save = useSave(ctx, reload);
   const [showOpt, setShowOpt] = useState(false);
-  const items = data.items.filter((i) => i.event_id === ev.id && !i.is_extra && (showOpt || i.chosen));
+  const items = data.items.filter((i) => i.event_id === ev.id && (showOpt || i.chosen)).sort((a, b) => (a.is_extra - b.is_extra) || (a.sort - b.sort));
   const sups = data.suppliers;
   const t = today();
+  // Tên NCC: có trong danh mục thì gán; tên mới thì thêm vào danh mục rồi gán
+  async function setSupplier(it, raw) {
+    const name = raw.trim();
+    if (!name) return save('ev_items', it.id, { supplier_id: null });
+    let sup = sups.find((x) => fold(x.name) === fold(name));
+    try {
+      if (!sup) {
+        sup = ok(await sb.from('ev_suppliers').insert({ name }).select().single());
+        ctx.notify(`Đã thêm "${name}" vào danh mục nhà cung cấp`);
+      }
+      await save('ev_items', it.id, { supplier_id: sup.id });
+    } catch (x) {
+      ctx.notify(x.message, 'err');
+    }
+  }
   async function choose(it, chosen) {
     await save('ev_items', it.id, { chosen });
     if (chosen && ev.event_date) {
@@ -388,10 +403,10 @@ function Items({ ctx, ev, data, reload }) {
       <tbody>${items.map((it) => {
         const late = it.supplier_status !== 'paid' && it.supplier_status !== 'none' && it.supplier_due && it.supplier_due < t;
         return html`<tr key=${it.id} class=${it.chosen ? '' : 'muted'}>
-          <td><b>${it.name}</b>${it.is_option && html` <label class="inline-check small"><input type="checkbox" checked=${it.chosen} onChange=${(e) => choose(it, e.target.checked)} /> Option${it.chosen ? ' (đã chọn)' : ''}</label>`}<div class="muted small clamp">${it.detail || ''}</div></td>
+          <td><b>${it.name}</b>${it.is_extra && html` <span class="badge warn">Phát sinh</span>`}${it.not_used && html` <span class="badge">Không dùng</span>`}${it.is_option && html` <label class="inline-check small"><input type="checkbox" checked=${it.chosen} onChange=${(e) => choose(it, e.target.checked)} /> Option${it.chosen ? ' (đã chọn)' : ''}</label>`}<div class="muted small clamp">${it.detail || ''}</div></td>
           <td class="num">${it.qty ?? ''} ${it.unit || ''}</td>
           <td class="num">${money(it.amount)}</td>
-          <td><select value=${it.supplier_id || ''} onChange=${(e) => save('ev_items', it.id, { supplier_id: e.target.value || null })}><option value="">—</option>${sups.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></td>
+          <td><input class="w-sup" list="sup-list" value=${sups.find((x) => x.id === it.supplier_id)?.name || ''} placeholder="Tên nhà cung cấp" onChange=${(e) => setSupplier(it, e.target.value)} /></td>
           <td class="num"><input class="w-num" type="number" value=${it.cost_amount ?? ''} onChange=${(e) => save('ev_items', it.id, { cost_amount: n(e.target.value) })} /></td>
           <td class="num"><input class="w-num" type="number" value=${it.supplier_paid ?? 0} onChange=${(e) => {
             const v = n(e.target.value) || 0;
@@ -403,7 +418,8 @@ function Items({ ctx, ev, data, reload }) {
         </tr>`;
       })}</tbody>
     </table></div>
-    <p class="muted small">Chưa có nhà cung cấp trong danh sách? Thêm ở tab "Nhà cung cấp" trên trang Triển khai giải.</p>
+    <datalist id="sup-list">${sups.map((x) => html`<option value=${x.name}>${x.category || ''}</option>`)}</datalist>
+    <p class="muted small">Gõ tên nhà cung cấp: chọn từ danh mục, hoặc gõ tên mới để tự thêm vào danh mục (bổ sung SĐT, số tài khoản ở tab "Nhà cung cấp" trên trang Triển khai giải).</p>
   </div>`;
 }
 
