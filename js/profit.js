@@ -1,7 +1,7 @@
 // Lợi nhuận tháng (chỉ người có quyền tài chính): các giải trong tháng, chi phí cố định, lãi ròng, hòa vốn, biểu đồ 12 tháng.
 import { html, useState, useEffect } from 'https://cdn.jsdelivr.net/npm/htm@3.1.1/preact/standalone.module.js';
 import { money } from './ev-core.js';
-import { eventProfit, monthProfit, fixedCosts, FIXED_DEFAULTS } from './finance-core.js';
+import { eventProfit, monthProfit, fixedCosts, insOf, FIXED_DEFAULTS } from './finance-core.js';
 import * as U from './util.js';
 import { ImportPastEvent, canDeleteEvent, deleteEvent } from './past-import.js';
 
@@ -74,7 +74,7 @@ export function ProfitView({ ctx }) {
     try {
       const clean = {
         ...f,
-        staff: f.staff.filter((s) => (s.name || '').trim() || s.salary).map((s) => ({ name: (s.name || '').trim(), salary: num(s.salary), insured: !!s.insured })),
+        staff: f.staff.filter((s) => (s.name || '').trim() || s.salary).map((s) => ({ name: (s.name || '').trim(), salary: num(s.salary), insured: !!s.insured, ins_amount: s.insured && s.ins_amount !== '' && s.ins_amount != null ? num(s.ins_amount) : null })),
         others: f.others.filter((o) => (o.name || '').trim() || o.amount).map((o) => ({ name: (o.name || '').trim(), amount: num(o.amount) })),
         ins_rate: Number(f.ins_rate) || 0, office_per_person: num(f.office_per_person), ads: num(f.ads), cit_rate: Number(f.cit_rate) || 0,
       };
@@ -155,14 +155,15 @@ export function ProfitView({ ctx }) {
           <td><input value=${s.name || ''} placeholder="Họ tên / vị trí" onInput=${(e) => setStaff(i, { name: e.target.value })} /></td>
           <td class="num"><input class="w-num" inputmode="numeric" value=${s.salary ?? ''} onInput=${(e) => setStaff(i, { salary: e.target.value })} /></td>
           <td><input type="checkbox" checked=${!!s.insured} onChange=${(e) => setStaff(i, { insured: e.target.checked })} /></td>
-          <td class="num">${money(s.insured ? num(s.salary) * (Number(f.ins_rate) || 0) : 0)}</td>
+          <td class="num">${s.insured ? html`<input class="w-num" type="number" value=${s.ins_amount ?? ''} placeholder=${Math.round(insOf({ ...s, ins_amount: null, salary: num(s.salary) }, f.ins_rate))} title="Để trống = tự tính theo tỉ lệ BH; gõ số = số tiền đóng thực tế" onInput=${(e) => setStaff(i, { ins_amount: e.target.value })} />
+            <div class="muted small">${s.ins_amount != null && s.ins_amount !== '' ? 'nhập tay' : 'tự tính ' + pct(Number(f.ins_rate))}</div>` : html`<span class="muted">0đ</span>`}</td>
           <td class="num">${money((s.name || '').trim() ? num(f.office_per_person) : 0)}</td>
           <td><button class="link danger" onClick=${() => set({ staff: f.staff.filter((_, j) => j !== i) })}>Xoá</button></td></tr>`)}
           <tr><td><b>Tổng nhân sự (${fc.people} người)</b></td><td class="num"><b>${money(fc.salary)}</b></td><td></td><td class="num"><b>${money(fc.insurance)}</b></td><td class="num"><b>${money(fc.office)}</b></td><td></td></tr>
         </tbody></table></div>
       <button class="link" onClick=${() => set({ staff: [...f.staff, { name: '', salary: '', insured: false }] })}>+ Thêm nhân sự</button>
       <div class="grid3">
-        <label>Tỉ lệ BH công ty đóng (%)<input type="number" step="0.1" value=${+(Number(f.ins_rate) * 100).toFixed(2)} onInput=${(e) => set({ ins_rate: Number(e.target.value) / 100 })} /></label>
+        <label>Tỉ lệ BH công ty đóng (%) <span class="muted small">- dùng khi không nhập tay số tiền</span><input type="number" step="0.1" value=${+(Number(f.ins_rate) * 100).toFixed(2)} onInput=${(e) => set({ ins_rate: Number(e.target.value) / 100 })} /></label>
         <label>Văn phòng mỗi người / tháng (đ)<input inputmode="numeric" value=${f.office_per_person} onInput=${(e) => set({ office_per_person: e.target.value })} /></label>
         <label>Facebook Ads / tháng (đ)<input inputmode="numeric" value=${f.ads} onInput=${(e) => set({ ads: e.target.value })} /></label>
         <label>Thuế suất TNDN (%) <span class="muted small">- cần kế toán xác nhận</span><input type="number" step="0.1" value=${+(Number(f.cit_rate) * 100).toFixed(2)} onInput=${(e) => set({ cit_rate: Number(e.target.value) / 100 })} /></label>

@@ -243,11 +243,17 @@ export function eventProfit(ev = {}, items = [], payments = []) {
 // 4. Lợi nhuận tháng
 // ---------------------------------------------------------------------------
 export const FIXED_DEFAULTS = { staff: [], ins_rate: 0.215, office_per_person: 1000000, ads: 0, others: [], cit_rate: 0.2 };
+// BH công ty đóng cho 1 người: số nhập tay (ins_amount) nếu có, không thì lương gross x tỉ lệ BH
+export const insOf = (s, rate) => {
+  if (!s.insured) return 0;
+  if (s.ins_amount != null && s.ins_amount !== '') return Number(String(s.ins_amount).replace(/[^\d.-]/g, '')) || 0;
+  return (Number(s.salary) || 0) * (Number(rate) || 0);
+};
 export function fixedCosts(f = {}) {
   const d = { ...FIXED_DEFAULTS, ...f };
   const staff = (d.staff || []).filter((s) => txt(s.name) || Number(s.salary));
   const salary = staff.reduce((a, s) => a + (Number(s.salary) || 0), 0);
-  const insurance = staff.reduce((a, s) => a + (s.insured ? (Number(s.salary) || 0) * (Number(d.ins_rate) || 0) : 0), 0);
+  const insurance = staff.reduce((a, s) => a + insOf(s, d.ins_rate), 0);
   const office = staff.filter((s) => txt(s.name)).length * (Number(d.office_per_person) || 0);
   const ads = Number(d.ads) || 0;
   const others = (d.others || []).reduce((a, o) => a + (Number(o.amount) || 0), 0);
