@@ -7,6 +7,7 @@ import * as U from './util.js';
 import { parseQuote, generateChecklist, tasksForItem, defaultPayments, eventHealth, money, addDays, PHASES, fold } from './ev-core.js';
 import { parseAcceptance, matchAcceptance, acceptanceItems, eventProfit, PAYEE, DEFAULTS } from './finance-core.js';
 import { canDeleteEvent, deleteEvent } from './past-import.js';
+import { parsePriceSheet, rankLines, autoPick, itemQty } from './supplier-core.js';
 
 const CHECKLIST_URL = 'https://hoangfairplaysports-web.github.io/fairplay-checklist/#events';
 const EV_STATUS = { preparing: 'Đang chuẩn bị', running: 'Đang diễn ra', done: 'Đã xong', cancelled: 'Đã huỷ' };
@@ -37,18 +38,19 @@ export function DeployView({ ctx }) {
 
   async function load() {
     try {
-      const [events, tasks, items, payments, suppliers, members] = await Promise.all([
+      const [events, tasks, items, payments, suppliers, members, prices] = await Promise.all([
         sb.from(fin ? 'ev_events' : 'ev_events_public').select('*').order('event_date').then(ok),
         sb.from('ev_tasks').select('id, event_id, status, due_date, phase').then(ok),
         fin ? sb.from('ev_items').select('*').order('sort').then(ok) : [],
         fin ? sb.from('ev_payments').select('*').order('sort').then(ok) : [],
         fin ? sb.from('ev_suppliers').select('*').order('name').then(ok) : [],
         sb.from('cl_members').select('id, full_name, role, active').then(ok).catch(() => []),
+        fin ? sb.from('ev_supplier_prices').select('*').order('sort').then(ok).catch(() => []) : [],
       ]);
-      setData({ events, tasks, items, payments, suppliers, members });
+      setData({ events, tasks, items, payments, suppliers, members, prices });
     } catch (e) {
       notify(e.message, 'err');
-      setData({ events: [], tasks: [], items: [], payments: [], suppliers: [], members: [] });
+      setData({ events: [], tasks: [], items: [], payments: [], suppliers: [], members: [], prices: [] });
     }
   }
   useEffect(() => {
@@ -369,16 +371,36 @@ function Items({ ctx, ev, data, reload }) {
   const items = data.items.filter((i) => i.event_id === ev.id && (showOpt || i.chosen)).sort((a, b) => (a.is_extra - b.is_extra) || (a.sort - b.sort));
   const sups = data.suppliers;
   const t = today();
-  // Tên NCC: có trong danh mục thì gán; tên mới thì thêm vào danh mục rồi gán
-  async function setSupplier(it, raw) {
+  const [picker, setPicker] = useState(null);
+  const [other, setOther] = useState(null);
+  const linesOf = (sid) => (data.prices || []).filter((p) => p.supplier_id === sid);
+  const groups = supplierGroups(sups);
+  // Chọn NCC → tự điền giá nhập theo bảng giá (khớp rõ thì điền luôn, nhiều lựa chọn thì hỏi); giá vẫn sửa tay được
+  async function pickSupplier(it, sid) {
+    if (sid === '__other') return setOther(it.id);
+    setOther(null);
+    if (!sid) return save('ev_items', it.id, { supplier_id: null });
+    const lines = linesOf(sid);
+    if (!lines.length) return save('ev_items', it.id, { supplier_id: sid }, 'Đã chọn NCC (NCC này chưa có bảng giá, nhập giá tay)');
+    const a = it.cost_amount == null ? autoPick(it, lines) : null;
+    if (a) {
+      const q = itemQty(it);
+      return save('ev_items', it.id, { supplier_id: sid, cost_amount: Math.round(a.price * q), accept_unit_cost: a.price },
+        `Giá nhập ${money(a.price)} × ${q} = ${money(a.price * q)} theo bảng giá "${a.item}". Sửa được nếu khác.`);
+    }
+    await save('ev_items', it.id, { supplier_id: sid });
+    setPicker({ itId: it.id, sid });
+  }
+  async function addOther(it, raw) {
     const name = raw.trim();
-    if (!name) return save('ev_items', it.id, { supplier_id: null });
-    let sup = sups.find((x) => fold(x.name) === fold(name));
+    if (!name) return setOther(null);
     try {
+      let sup = sups.find((x) => fold(x.name) === fold(name));
       if (!sup) {
-        sup = ok(await sb.from('ev_suppliers').insert({ name }).select().single());
-        ctx.notify(`Đã thêm "${name}" vào danh mục nhà cung cấp`);
+        sup = ok(await sb.from('ev_suppliers').insert({ name, region: ev.region || null }).select().single());
+        ctx.notify(`Đã thêm "${name}" vào danh bạ nhà cung cấp`);
       }
+      setOther(null);
       await save('ev_items', it.id, { supplier_id: sup.id });
     } catch (x) {
       ctx.notify(x.message, 'err');
@@ -406,8 +428,14 @@ function Items({ ctx, ev, data, reload }) {
           <td><b>${it.name}</b>${it.is_extra && html` <span class="badge warn">Phát sinh</span>`}${it.not_used && html` <span class="badge">Không dùng</span>`}${it.is_option && html` <label class="inline-check small"><input type="checkbox" checked=${it.chosen} onChange=${(e) => choose(it, e.target.checked)} /> Option${it.chosen ? ' (đã chọn)' : ''}</label>`}<div class="muted small clamp">${it.detail || ''}</div></td>
           <td class="num">${it.qty ?? ''} ${it.unit || ''}</td>
           <td class="num">${money(it.amount)}</td>
-          <td><input class="w-sup" list="sup-list" value=${sups.find((x) => x.id === it.supplier_id)?.name || ''} placeholder="Tên nhà cung cấp" onChange=${(e) => setSupplier(it, e.target.value)} /></td>
-          <td class="num"><input class="w-num" type="number" value=${it.cost_amount ?? ''} onChange=${(e) => save('ev_items', it.id, { cost_amount: n(e.target.value) })} /></td>
+          <td><select class="w-sup" value=${it.supplier_id || ''} onChange=${(e) => pickSupplier(it, e.target.value)}>
+              <option value="">- Chọn NCC -</option>
+              ${groups.map(([g, list]) => html`<optgroup label=${g}>${list.map((x) => html`<option value=${x.id}>${x.name}${linesOf(x.id).length ? '' : ' (chưa có giá)'}</option>`)}</optgroup>`)}
+              <option value="__other">＋ Khác (nhập tên mới)…</option>
+            </select>
+            ${other === it.id && html`<input class="w-sup" autofocus placeholder="Tên NCC mới, Enter để lưu" onKeyDown=${(e) => { if (e.key === 'Enter') addOther(it, e.target.value); if (e.key === 'Escape') setOther(null); }} onBlur=${(e) => addOther(it, e.target.value)} />`}</td>
+          <td class="num"><div class="cost-cell"><input class="w-num" type="number" value=${it.cost_amount ?? ''} onChange=${(e) => save('ev_items', it.id, { cost_amount: n(e.target.value) })} />
+            ${it.supplier_id && linesOf(it.supplier_id).length > 0 && html`<button class="link" title="Chọn giá từ bảng giá NCC" onClick=${() => setPicker({ itId: it.id, sid: it.supplier_id })}>💲</button>`}</div></td>
           <td class="num"><input class="w-num" type="number" value=${it.supplier_paid ?? 0} onChange=${(e) => {
             const v = n(e.target.value) || 0;
             save('ev_items', it.id, { supplier_paid: v, supplier_status: v <= 0 ? 'unpaid' : it.cost_amount && v >= it.cost_amount ? 'paid' : 'partial' });
@@ -418,8 +446,11 @@ function Items({ ctx, ev, data, reload }) {
         </tr>`;
       })}</tbody>
     </table></div>
-    <datalist id="sup-list">${sups.map((x) => html`<option value=${x.name}>${x.category || ''}</option>`)}</datalist>
-    <p class="muted small">Gõ tên nhà cung cấp: chọn từ danh mục, hoặc gõ tên mới để tự thêm vào danh mục (bổ sung SĐT, số tài khoản ở tab "Nhà cung cấp" trên trang Triển khai giải).</p>
+    <p class="muted small">Chọn nhà cung cấp là giá nhập tự điền theo bảng giá (đơn giá × số lượng); nhiều dòng giá gần giống thì chọn dòng đúng. Bấm 💲 để chọn lại, hoặc sửa thẳng ô Giá nhập.
+      NCC mới: chọn "＋ Khác". Bảng giá, SĐT, số tài khoản sửa ở tab "Nhà cung cấp" trên trang Triển khai giải.</p>
+    ${picker && html`<${PricePicker} it=${data.items.find((x) => x.id === picker.itId)} sup=${sups.find((x) => x.id === picker.sid)} lines=${linesOf(picker.sid)}
+      onClose=${() => setPicker(null)} onApply=${async (l, q, price) => { const it = data.items.find((x) => x.id === picker.itId); setPicker(null);
+        await save('ev_items', it.id, { supplier_id: picker.sid, cost_amount: Math.round(price * q), accept_unit_cost: price }, `Giá nhập ${money(price)} × ${q} = ${money(price * q)}`); }} />`}
   </div>`;
 }
 
@@ -553,14 +584,62 @@ function Files({ ctx, ev }) {
   </div>`;
 }
 
+const REGIONS = ['Miền Bắc', 'Miền Nam', 'Cả nước'];
+// NCC chia nhóm theo miền cho ô chọn
+function supplierGroups(sups) {
+  const by = {};
+  for (const x of sups) (by[x.region || 'Khác'] ||= []).push(x);
+  return [...REGIONS, 'Khác'].filter((g) => by[g]).map((g) => [g, by[g].sort((a, b) => a.name.localeCompare(b.name, 'vi'))]);
+}
+const priceText = (l) => (l.price == null ? 'chưa có giá' : money(l.price) + (l.price_max ? ' - ' + money(l.price_max) : ''));
+
+// Chọn dòng giá của NCC cho 1 hạng mục: dòng khớp nhất lên đầu, sửa được số lượng và đơn giá
+function PricePicker({ it, sup, lines, onApply, onClose }) {
+  const ranked = rankLines(it, lines);
+  const [q, setQ] = useState('');
+  const [sel, setSel] = useState(ranked.find((x) => x.l.price != null)?.l || ranked[0]?.l);
+  const [qty, setQty] = useState(itemQty(it));
+  const [price, setPrice] = useState(sel?.price ?? '');
+  const f = fold(q);
+  const shown = ranked.filter(({ l }) => !f || fold(`${l.item} ${l.detail || ''} ${l.grp || ''} ${l.category || ''}`).includes(f));
+  const pick = (l) => {
+    setSel(l);
+    setPrice(l.price ?? '');
+  };
+  return html`<${Modal} title=${`Bảng giá ${sup?.name || ''} · ${it.name}`} onClose=${onClose} wide>
+    <div class="form">
+      <p class="muted small">${it.detail || ''}${it.qty ? ` · báo giá khách: ${it.qty} ${it.unit || ''}` : ''}. Dòng khớp nhất xếp đầu.</p>
+      <input type="search" placeholder="Tìm trong bảng giá…" value=${q} onInput=${(e) => setQ(e.target.value)} />
+      <div class="table-wrap" style="max-height:45vh;overflow:auto"><table class="table compact">
+        <thead><tr><th></th><th>Hạng mục NCC</th><th>ĐVT</th><th class="num">Đơn giá</th></tr></thead>
+        <tbody>${shown.map(({ l }) => html`<tr key=${l.id} class=${'click' + (sel?.id === l.id ? ' on-row' : '')} onClick=${() => pick(l)}>
+          <td><input type="radio" checked=${sel?.id === l.id} /></td>
+          <td><b>${l.item}</b>${l.grp ? html` <span class="muted small">· ${l.grp}</span>` : ''}<div class="muted small">${[l.category, l.detail, l.note].filter(Boolean).join(' · ')}</div></td>
+          <td class="small">${l.unit || ''}</td><td class="num">${priceText(l)}</td></tr>`)}</tbody>
+      </table></div>
+      <div class="grid3">
+        <label>Số lượng<input type="number" step="any" value=${qty} onInput=${(e) => setQty(e.target.value)} /></label>
+        <label>Đơn giá nhập (sửa được)<input type="number" value=${price} onInput=${(e) => setPrice(e.target.value)} /></label>
+        <div><span class="muted small">Giá nhập</span><div><b>${money((Number(qty) || 0) * (Number(price) || 0))}</b></div></div>
+      </div>
+      ${sel?.price_max ? html`<p class="note">NCC báo khoảng giá ${priceText(sel)}: đang lấy giá thấp, sửa nếu đã chốt giá khác.</p>` : ''}
+      <div class="row end"><button class="btn" onClick=${onClose}>Huỷ</button>
+        <button class="btn primary" disabled=${!sel || price === '' || price == null} onClick=${() => onApply(sel, Number(qty) || 1, Number(price) || 0)}>Áp dụng</button></div>
+    </div>
+  <//>`;
+}
+
 function Suppliers({ ctx, data, reload }) {
   const sb = ctx.store.sb;
+  const canEdit = ctx.canEditMoney;
   const [f, setF] = useState(null);
+  const [importing, setImporting] = useState(false);
+  const [q, setQ] = useState('');
   async function save(e) {
     e.preventDefault();
     if (!f.name?.trim()) return;
     try {
-      const row = { name: f.name.trim(), category: f.category || null, contact: f.contact || null, phone: f.phone || null, bank: f.bank || null, note: f.note || null };
+      const row = { name: f.name.trim(), region: f.region || null, category: f.category || null, contact: f.contact || null, phone: f.phone || null, bank: f.bank || null, note: f.note || null };
       if (f.id) ok(await sb.from('ev_suppliers').update(row).eq('id', f.id));
       else ok(await sb.from('ev_suppliers').insert(row));
       setF(null);
@@ -570,24 +649,134 @@ function Suppliers({ ctx, data, reload }) {
     }
   }
   const owe = (s) => data.items.filter((i) => i.supplier_id === s.id && i.supplier_status !== 'paid').reduce((a, i) => a + Math.max(0, (Number(i.cost_amount) || 0) - (Number(i.supplier_paid) || 0)), 0);
+  const nPrice = (s) => (data.prices || []).filter((p) => p.supplier_id === s.id).length;
+  const fq = fold(q);
+  const list = data.suppliers.filter((s) => !fq || fold(`${s.name} ${s.category || ''} ${s.region || ''}`).includes(fq));
   return html`<div>
-    <div class="row between"><p class="muted">Danh bạ nhà cung cấp dùng lại cho mọi giải.</p><button class="btn primary" onClick=${() => setF({})}>+ Nhà cung cấp</button></div>
+    <div class="row between"><p class="muted">Danh bạ và bảng giá nhà cung cấp dùng lại cho mọi giải. Chọn NCC ở tab "Hạng mục & NCC" của giải là tự điền giá nhập.</p>
+      <div class="row"><input type="search" placeholder="Tìm NCC…" value=${q} onInput=${(e) => setQ(e.target.value)} />
+        ${canEdit && html`<button class="btn" onClick=${() => setImporting(true)}>⬆ Nhập bảng giá Excel</button><button class="btn primary" onClick=${() => setF({})}>+ Nhà cung cấp</button>`}</div></div>
     <div class="table-wrap"><table class="table leads">
-      <thead><tr><th>Tên</th><th>Mảng</th><th>Liên hệ</th><th>Tài khoản</th><th class="num">Còn nợ</th></tr></thead>
-      <tbody>${data.suppliers.map((s) => html`<tr onClick=${() => setF(s)}><td><b>${s.name}</b><div class="muted small">${s.note || ''}</div></td><td>${s.category || ''}</td><td>${[s.contact, s.phone].filter(Boolean).join(' · ')}</td><td class="small">${s.bank || ''}</td><td class="num">${money(owe(s))}</td></tr>`)}</tbody>
+      <thead><tr><th>Tên</th><th>Miền</th><th>Mảng</th><th class="num">Bảng giá</th><th>Liên hệ</th><th>Tài khoản</th><th class="num">Còn nợ</th></tr></thead>
+      <tbody>${list.map((s) => html`<tr class="click" key=${s.id} onClick=${() => setF(s)}><td><b>${s.name}</b><div class="muted small">${s.note || ''}</div></td><td class="small">${s.region || '-'}</td><td class="small">${s.category || ''}</td>
+        <td class="num">${nPrice(s) ? nPrice(s) + ' dòng' : html`<span class="muted">-</span>`}</td><td class="small">${[s.contact, s.phone].filter(Boolean).join(' · ')}</td><td class="small">${s.bank || ''}</td><td class="num">${owe(s) ? money(owe(s)) : '-'}</td></tr>`)}</tbody>
     </table></div>
-    ${f && html`<${Modal} title=${f.id ? 'Sửa nhà cung cấp' : 'Thêm nhà cung cấp'} onClose=${() => setF(null)}>
+    ${f && html`<${Modal} title=${f.id ? 'Nhà cung cấp: ' + f.name : 'Thêm nhà cung cấp'} onClose=${() => setF(null)} wide>
       <form class="form" onSubmit=${save}>
-        <label>Tên *<input value=${f.name || ''} onInput=${(e) => setF({ ...f, name: e.target.value })} /></label>
-        <div class="grid2"><label>Mảng<input value=${f.category || ''} onInput=${(e) => setF({ ...f, category: e.target.value })} placeholder="In ấn, trọng tài, âm thanh…" /></label>
-          <label>Người liên hệ<input value=${f.contact || ''} onInput=${(e) => setF({ ...f, contact: e.target.value })} /></label>
-          <label>SĐT<input value=${f.phone || ''} onInput=${(e) => setF({ ...f, phone: e.target.value })} /></label>
-          <label>Số tài khoản / ngân hàng<input value=${f.bank || ''} onInput=${(e) => setF({ ...f, bank: e.target.value })} /></label></div>
-        <label>Ghi chú<input value=${f.note || ''} onInput=${(e) => setF({ ...f, note: e.target.value })} /></label>
-        <div class="row end"><button type="button" class="btn" onClick=${() => setF(null)}>Huỷ</button><button class="btn primary">Lưu</button></div>
+        <div class="grid3">
+          <label>Tên *<input value=${f.name || ''} disabled=${!canEdit} onInput=${(e) => setF({ ...f, name: e.target.value })} /></label>
+          <label>Miền<select value=${f.region || ''} disabled=${!canEdit} onChange=${(e) => setF({ ...f, region: e.target.value })}><option value="">-</option>${REGIONS.map((r) => html`<option value=${r}>${r}</option>`)}</select></label>
+          <label>Mảng<input value=${f.category || ''} disabled=${!canEdit} onInput=${(e) => setF({ ...f, category: e.target.value })} placeholder="In ấn, trọng tài, âm thanh…" /></label>
+          <label>Người liên hệ<input value=${f.contact || ''} disabled=${!canEdit} onInput=${(e) => setF({ ...f, contact: e.target.value })} /></label>
+          <label>SĐT<input value=${f.phone || ''} disabled=${!canEdit} onInput=${(e) => setF({ ...f, phone: e.target.value })} /></label>
+          <label>Số tài khoản / ngân hàng<input value=${f.bank || ''} disabled=${!canEdit} onInput=${(e) => setF({ ...f, bank: e.target.value })} /></label>
+        </div>
+        <label>Ghi chú<input value=${f.note || ''} disabled=${!canEdit} onInput=${(e) => setF({ ...f, note: e.target.value })} /></label>
+        ${canEdit && html`<div class="row end"><button type="button" class="btn" onClick=${() => setF(null)}>Đóng</button><button class="btn primary">Lưu thông tin</button></div>`}
       </form>
+      ${f.id && html`<${PriceList} ctx=${ctx} sup=${f} lines=${(data.prices || []).filter((p) => p.supplier_id === f.id)} canEdit=${canEdit} reload=${reload} />`}
     </${Modal}>`}
+    ${importing && html`<${ImportPrices} ctx=${ctx} data=${data} onClose=${() => setImporting(false)} onDone=${() => { setImporting(false); reload(); }} />`}
   </div>`;
+}
+
+// Bảng giá của 1 NCC: sửa trực tiếp, lưu khi rời ô
+function PriceList({ ctx, sup, lines, canEdit, reload }) {
+  const sb = ctx.store.sb;
+  const upd = async (id, patch) => {
+    try {
+      ok(await sb.from('ev_supplier_prices').update(patch).eq('id', id));
+      reload();
+    } catch (x) {
+      ctx.notify(x.message, 'err');
+    }
+  };
+  const add = async () => {
+    try {
+      ok(await sb.from('ev_supplier_prices').insert({ supplier_id: sup.id, item: 'Hạng mục mới', category: sup.category || null, sort: lines.length }));
+      reload();
+    } catch (x) {
+      ctx.notify(x.message, 'err');
+    }
+  };
+  const num = (v) => (v === '' ? null : Number(String(v).replace(/[^\d]/g, '')) || null);
+  return html`<div class="section-head"><h3>Bảng giá (${lines.length} dòng)</h3>${canEdit && html`<button class="link" onClick=${add}>＋ Thêm dòng</button>`}</div>
+    ${lines.length === 0 ? html`<div class="empty">Chưa có bảng giá. Nhập từ file Excel hoặc thêm từng dòng.</div>` : html`<div class="table-wrap" style="max-height:50vh;overflow:auto"><table class="table compact">
+      <thead><tr><th>Nhóm</th><th>Hạng mục</th><th>Chi tiết</th><th>ĐVT</th><th class="num">Đơn giá</th><th class="num">Giá cao (nếu khoảng)</th><th></th></tr></thead>
+      <tbody>${lines.map((l) => html`<tr key=${l.id}>
+        <td><input class="w-num" value=${l.grp || ''} disabled=${!canEdit} onChange=${(e) => upd(l.id, { grp: e.target.value || null })} /></td>
+        <td><input value=${l.item} disabled=${!canEdit} onChange=${(e) => upd(l.id, { item: e.target.value || 'Hạng mục' })} /></td>
+        <td><input value=${l.detail || ''} disabled=${!canEdit} onChange=${(e) => upd(l.id, { detail: e.target.value || null })} /></td>
+        <td><input class="short" value=${l.unit || ''} disabled=${!canEdit} onChange=${(e) => upd(l.id, { unit: e.target.value || null })} /></td>
+        <td class="num"><input class="w-num" type="number" value=${l.price ?? ''} disabled=${!canEdit} onChange=${(e) => upd(l.id, { price: num(e.target.value) })} /></td>
+        <td class="num"><input class="w-num" type="number" value=${l.price_max ?? ''} disabled=${!canEdit} onChange=${(e) => upd(l.id, { price_max: num(e.target.value) })} /></td>
+        <td>${canEdit && html`<button class="link danger" onClick=${async () => { if (confirm('Xoá dòng giá này?')) { ok(await sb.from('ev_supplier_prices').delete().eq('id', l.id)); reload(); } }}>Xoá</button>`}</td>
+      </tr>`)}</tbody></table></div>`}`;
+}
+
+// Nhập file "Báo giá tổng hợp hạng mục cung cấp": mỗi sheet là bảng giá của 1 NCC
+function ImportPrices({ ctx, data, onClose, onDone }) {
+  const sb = ctx.store.sb;
+  const [sheets, setSheets] = useState(null);
+  const [region, setRegion] = useState('Miền Bắc');
+  const [busy, setBusy] = useState('');
+  const [err, setErr] = useState('');
+  async function onFile(e) {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const XLSX = await loadXlsx();
+      const wb = XLSX.read(await file.arrayBuffer());
+      const list = wb.SheetNames.map((n) => parsePriceSheet(XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: null }), n)).filter((x) => x && x.lines.length);
+      if (!list.length) return setErr('Không thấy bảng giá (cần dòng tiêu đề có STT / Nội dung / Đơn giá).');
+      if (/nam/i.test(fold(file.name))) setRegion('Miền Nam');
+      setSheets(list.map((x) => {
+        const match = data.suppliers.find((s) => x.vendor && fold(s.name) === fold(x.vendor));
+        return { ...x, include: true, name: x.vendor || '', supplier_id: match?.id || '', mode: 'replace' };
+      }));
+      setErr('');
+    } catch (x) {
+      setErr('Không đọc được file: ' + x.message);
+    }
+  }
+  const upd = (i, patch) => setSheets(sheets.map((x, j) => (j === i ? { ...x, ...patch } : x)));
+  async function run() {
+    const list = sheets.filter((x) => x.include);
+    if (list.some((x) => !x.supplier_id && !x.name.trim())) return setErr('Đặt tên NCC cho từng sheet (hoặc chọn NCC có sẵn).');
+    try {
+      for (const x of list) {
+        setBusy(`Đang nhập ${x.sheet}…`);
+        let sid = x.supplier_id;
+        if (!sid) sid = ok(await sb.from('ev_suppliers').insert({ name: x.name.trim(), region, category: x.category || null }).select().single()).id;
+        if (x.mode === 'replace') ok(await sb.from('ev_supplier_prices').delete().eq('supplier_id', sid).eq('category', x.category));
+        ok(await sb.from('ev_supplier_prices').insert(x.lines.map((l, i) => ({ ...l, supplier_id: sid, category: x.category || null, sort: i }))));
+      }
+      ctx.notify(`Đã nhập bảng giá ${list.length} sheet`);
+      onDone();
+    } catch (x) {
+      setErr(x.message);
+    }
+    setBusy('');
+  }
+  return html`<${Modal} title="Nhập bảng giá nhà cung cấp" onClose=${onClose} wide>
+    <div class="form">
+      <p class="muted">Mỗi sheet là bảng giá của 1 NCC (dòng tiêu đề có STT, Nội dung / Hạng mục, ĐVT, Đơn giá). Tên NCC được đoán từ tiêu đề, sửa lại nếu sai. Chọn NCC có sẵn thì bảng giá cùng mảng sẽ được thay mới.</p>
+      <div class="row"><input type="file" accept=".xlsx,.xls" onChange=${onFile} />
+        <label class="inline-check">Miền <select value=${region} onChange=${(e) => setRegion(e.target.value)}>${REGIONS.map((r) => html`<option value=${r}>${r}</option>`)}</select></label></div>
+      ${sheets && sheets.map((x, i) => html`<fieldset class="fs" key=${i}>
+        <legend><label class="inline-check"><input type="checkbox" checked=${x.include} onChange=${(e) => upd(i, { include: e.target.checked })} /> Sheet "${x.sheet}" · ${x.lines.length} dòng giá</label></legend>
+        ${x.include && html`<div class="grid3">
+          <label>NCC có sẵn<select value=${x.supplier_id} onChange=${(e) => upd(i, { supplier_id: e.target.value })}><option value="">- Tạo NCC mới -</option>${data.suppliers.map((s) => html`<option value=${s.id}>${s.name}</option>`)}</select></label>
+          ${!x.supplier_id && html`<label>Tên NCC mới *<input value=${x.name} onInput=${(e) => upd(i, { name: e.target.value })} placeholder="VD: SK Hà Minh Anh" /></label>`}
+          <label>Mảng<input value=${x.category} onInput=${(e) => upd(i, { category: e.target.value })} /></label>
+        </div>
+        <p class="muted small">${x.title}</p>
+        <div class="muted small">${x.lines.slice(0, 6).map((l) => `${l.item} (${l.unit || '-'}) ${priceText(l)}`).join(' · ')}${x.lines.length > 6 ? ' …' : ''}</div>`}
+      </fieldset>`)}
+      ${err && html`<div class="err">${err}</div>`}
+      ${sheets && html`<div class="row end"><button class="btn" onClick=${onClose}>Huỷ</button><button class="btn primary" disabled=${!!busy} onClick=${run}>${busy || 'Nhập bảng giá'}</button></div>`}
+    </div>
+  <//>`;
 }
 
 // ---------------------------------------------------------------------------

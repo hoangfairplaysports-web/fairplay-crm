@@ -351,7 +351,7 @@ tr.dim td { color: var(--muted); }
 .drawer.wide-drawer .seg { flex-wrap: wrap; }
 .table.items input, .table.items select { font-size: 12.5px; padding: 4px 6px; max-width: 150px; }
 .w-num { width: 110px; text-align: right; }
-.w-sup { width: 170px; }
+.w-sup { width: 180px; display: block; }
 .bad-sel { border-color: var(--bad); color: var(--bad); }
 .card-sec.late { border-color: var(--bad); }
 .fs .grid2, .fs .grid3 { margin-top: 8px; }
@@ -382,3 +382,5 @@ tr.dim td { color: var(--muted); }
 .ok-text { color: var(--ok); font-weight: 600; }
 .kpi b small { font-size: 14px; font-weight: 500; }
 .badge:not(.bad):not(.warn):not(.ok):not(.info) { background: #eef3f8; color: var(--muted); }
+.cost-cell { display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
+tr.on-row td { background: var(--brand-soft); }
