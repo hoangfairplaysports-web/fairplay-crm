@@ -177,26 +177,26 @@ export function CustomerDrawer({ ctx, customer: c, onClose }) {
         <button class="x" onClick=${onClose} aria-label="Đóng">×</button>
       </div>
       <div class="drawer-body">
-        ${sug.season.map((s) => html`<div class="suggest">🗓 <b>Mùa giải:</b> "${s.event.name}" tổ chức ${U.fmtDate(s.event.event_date)} — còn ${s.gap} ngày tới kỷ niệm. Liên hệ đề xuất giải năm nay.
+        ${!ctx.isMkt && sug.season.map((s) => html`<div class="suggest">🗓 <b>Mùa giải:</b> "${s.event.name}" tổ chức ${U.fmtDate(s.event.event_date)} — còn ${s.gap} ngày tới kỷ niệm. Liên hệ đề xuất giải năm nay.
           <button class="btn sm" onClick=${() => startNewLead(newLeadFor(ctx, c, s.event.sport))}>Tạo cơ hội mới</button></div>`)}
-        ${sug.thanks.map((s) => html`<div class="suggest">🙏 <b>Tri ân sau giải</b> "${s.event.name}" (${U.fmtDate(s.event.event_date)}): gửi lời cảm ơn / quà, xin feedback.
+        ${!ctx.isMkt && sug.thanks.map((s) => html`<div class="suggest">🙏 <b>Tri ân sau giải</b> "${s.event.name}" (${U.fmtDate(s.event.event_date)}): gửi lời cảm ơn / quà, xin feedback.
           <button class="btn sm" onClick=${() => setModal({ t: 'gift', preset: { occasion: 'Tri ân sau giải', occasion_key: s.key } })}>Ghi nhận</button></div>`)}
-        ${sug.loyal.map((s) => html`<div class="suggest">🎁 <b>${s.label}</b> — đã tổ chức ${s.n} giải cùng Fairplay.
+        ${!ctx.isMkt && sug.loyal.map((s) => html`<div class="suggest">🎁 <b>${s.label}</b> — đã tổ chức ${s.n} giải cùng Fairplay.
           <button class="btn sm" onClick=${() => setModal({ t: 'gift', preset: { occasion: s.label, occasion_key: s.key } })}>Ghi nhận quà</button></div>`)}
 
-        ${pc ? html`<div><div class="muted small">Đầu mối chính: <b>${pc.name}</b>${pc.title ? ' · ' + pc.title : ''}</div>
+        ${ctx.isMkt ? html`<p class="note">Bạn đang xem với quyền Marketing: chỉ xem, đầu mối và quà tặng của khách cũ được ẩn.</p>` : pc ? html`<div><div class="muted small">Đầu mối chính: <b>${pc.name}</b>${pc.title ? ' · ' + pc.title : ''}</div>
             <${ContactButtons} ctx=${ctx} lead=${asLead(pc, c)} onLogged=${(t) => { setType(t); setTimeout(() => noteRef.current?.focus(), 50); }} /></div>`
           : html`<div class="dupwarn">Chưa có đầu mối liên hệ. <button class="link" onClick=${() => setModal({ t: 'contact' })}>Thêm đầu mối</button></div>`}
 
-        <form class="logbox" onSubmit=${submit}>
+        ${!ctx.isMkt && html`<form class="logbox" onSubmit=${submit}>
           <div class="chips">${U.ACTIVITY_TYPES.map((t) => html`<button type="button" class=${'chip' + (type === t.id ? ' on' : '')} onClick=${() => setType(t.id)}>${t.icon} ${t.label}</button>`)}</div>
           <textarea ref=${noteRef} rows="3" placeholder="Nội dung chăm sóc: hỏi thăm, kế hoạch sắp tới của khách, nhu cầu mới…" value=${content} onInput=${(e) => setContent(e.target.value)} />
           <${FollowupInput} label="Hẹn chăm sóc tiếp theo *" value=${nc} onChange=${setNc} chips=${CARE_CHIPS} />
           ${err && html`<div class="err">${err}</div>`}
           <div class="row end"><button class="btn primary" disabled=${busy}>${busy ? 'Đang lưu…' : 'Lưu chăm sóc'}</button></div>
-        </form>
+        </form>`}
 
-        <div class="section-head"><h3>Đầu mối (${ks.length})</h3><button class="link" onClick=${() => setModal({ t: 'contact' })}>＋ Thêm</button></div>
+        <div class="section-head"><h3>Đầu mối (${ks.length})</h3>${!ctx.isMkt && html`<button class="link" onClick=${() => setModal({ t: 'contact' })}>＋ Thêm</button>`}</div>
         ${ks.length === 0 ? html`<div class="empty">Chưa có đầu mối</div>` : html`<div class="minilist">${ks.map((k) => html`<div class="mini" key=${k.id}>
           <div class="mini-main" onClick=${() => setModal({ t: 'contact', row: k })}>
             <b>${k.is_primary ? '★ ' : ''}${k.name}</b> <span class="muted small">${[k.title, k.gender].filter(Boolean).join(' · ')}</span>
@@ -205,7 +205,7 @@ export function CustomerDrawer({ ctx, customer: c, onClose }) {
           <${ContactButtons} ctx=${ctx} lead=${asLead(k, c)} compact />
         </div>`)}</div>`}
 
-        <div class="section-head"><h3>Giải đấu (${evs.length}) · đã làm ${n}</h3><button class="link" onClick=${() => ctx.openEvent({ customer_id: c.id })}>＋ Thêm giải</button></div>
+        <div class="section-head"><h3>Giải đấu (${evs.length}) · đã làm ${n}</h3>${!ctx.isMkt && html`<button class="link" onClick=${() => ctx.openEvent({ customer_id: c.id })}>＋ Thêm giải</button>`}</div>
         ${evs.length === 0 ? html`<div class="empty">Chưa có giải nào</div>` : html`<div class="minilist">${evs.map((e) => html`<div class="mini click" key=${e.id} onClick=${() => ctx.openEvent(e)}>
           <div class="mini-main"><b>${e.name}</b>
             <div class="muted small">${[U.eventWhen(e), e.sport, e.headcount && e.headcount + ' người', ctx.people[e.pic_id]?.full_name].filter(Boolean).join(' · ')}</div>
@@ -213,17 +213,17 @@ export function CustomerDrawer({ ctx, customer: c, onClose }) {
           <${EventStatusPill} status=${e.status} />
         </div>`)}</div>`}
 
-        <div class="section-head"><h3>Cơ hội / Lead (${cLeads.length})</h3><button class="link" onClick=${() => startNewLead(newLeadFor(ctx, c))}>＋ Cơ hội mới</button></div>
+        <div class="section-head"><h3>Cơ hội / Lead (${cLeads.length})</h3>${!ctx.isMkt && html`<button class="link" onClick=${() => startNewLead(newLeadFor(ctx, c))}>＋ Cơ hội mới</button>`}</div>
         ${cLeads.length > 0 && html`<div class="minilist">${cLeads.map((l) => html`<div class="mini click" key=${l.id} onClick=${() => openLead(l.id)}>
           <div class="mini-main"><b>${l.need || 'Nhu cầu chưa rõ'}</b> <span class="muted small">· ${l.name} · ${U.fmtDate(l.created_at)}</span></div><${StagePill} stage=${l.stage} /></div>`)}</div>`}
 
-        <div class="section-head"><h3>Quà tặng (${cGifts.length})</h3><button class="link" onClick=${() => setModal({ t: 'gift' })}>＋ Ghi nhận quà</button></div>
+        <div class="section-head"><h3>Quà tặng (${cGifts.length})</h3>${!ctx.isMkt && html`<button class="link" onClick=${() => setModal({ t: 'gift' })}>＋ Ghi nhận quà</button>`}</div>
         ${cGifts.length > 0 && html`<div class="minilist">${cGifts.map((g) => html`<div class="mini click" key=${g.id} onClick=${() => setModal({ t: 'gift', row: g })}>
           <div class="mini-main"><b>${g.occasion}</b> <span class="muted small">· ${ctx.contacts.find((k) => k.id === g.contact_id)?.name || 'Cả đơn vị'}</span>
             <div class="muted small">${[g.gift, U.fmtDate(g.gift_date)].filter(Boolean).join(' · ')}</div></div>
           <span class=${'badge ' + (g.status === 'given' ? 'ok' : g.status === 'planned' ? 'warn' : '')}>${U.GIFT_STATUS[g.status]}</span></div>`)}</div>`}
 
-        <div class="section-head"><h3>Thông tin</h3><button class="link" onClick=${() => setModal({ t: 'customer' })}>✎ Sửa</button></div>
+        <div class="section-head"><h3>Thông tin</h3>${!ctx.isMkt && html`<button class="link" onClick=${() => setModal({ t: 'customer' })}>✎ Sửa</button>`}</div>
         <dl class="infolist">
           <dt>Phụ trách</dt><dd>${isMgr
             ? html`<${Select} value=${c.owner_id || ''} placeholder="— Chưa giao —" options=${salesPeople(profiles).map((p) => ({ value: p.id, label: p.full_name }))}
@@ -523,19 +523,19 @@ export function CareView({ ctx }) {
     <//>
 
     <${Section} title="Sắp tới mùa giải" count=${sug.season.length} tone="warn" hint=${`Khách từng tổ chức giải vào thời điểm này năm trước (trong ${settings.season_days} ngày tới), chưa có cơ hội mới`} empty="Chưa có">
-      ${sug.season.map((s) => html`<${CRow} c=${s.customer} key=${s.customer.id}
+      ${!ctx.isMkt && sug.season.map((s) => html`<${CRow} c=${s.customer} key=${s.customer.id}
           actions=${html`<button class="btn sm" onClick=${() => startNewLead(newLeadFor(ctx, s.customer, s.event.sport))}>＋ Tạo cơ hội</button>`}>
         <span>🗓 "${s.event.name}" — ${U.fmtDate(s.event.event_date)}</span> <span class="badge info">Kỷ niệm còn ${s.gap} ngày</span><//>`)}
     <//>
 
     <${Section} title="Tri ân sau giải" count=${sug.thanks.length} hint="Giải vừa kết thúc trong 21 ngày: gửi lời cảm ơn / quà, xin feedback" empty="Chưa có">
-      ${sug.thanks.map((s) => html`<${CRow} c=${s.customer} key=${s.key}
+      ${!ctx.isMkt && sug.thanks.map((s) => html`<${CRow} c=${s.customer} key=${s.key}
           actions=${html`<button class="btn sm" onClick=${() => setModal({ customer: s.customer, preset: { occasion: 'Tri ân sau giải', occasion_key: s.key } })}>Ghi nhận</button><button class="link" onClick=${() => quickGift(s.customer, s.key, 'Tri ân sau giải', null, 'skipped')}>Bỏ qua</button>`}>
         <span>🏆 ${s.event.name} · ${U.fmtDate(s.event.event_date)}</span><//>`)}
     <//>
 
     <${Section} title="Khách thân thiết / VIP cần tri ân" count=${sug.loyal.length} hint=${`Từ ${settings.loyal_threshold} giải trở lên = Thân thiết, từ ${settings.vip_threshold} giải = VIP`} empty="Chưa có">
-      ${sug.loyal.map((s) => html`<${CRow} c=${s.customer} key=${s.customer.id + s.key}
+      ${!ctx.isMkt && sug.loyal.map((s) => html`<${CRow} c=${s.customer} key=${s.customer.id + s.key}
           actions=${html`<button class="btn sm" onClick=${() => setModal({ customer: s.customer, preset: { occasion: s.label, occasion_key: s.key } })}>Ghi nhận quà</button><button class="link" onClick=${() => quickGift(s.customer, s.key, s.label, null, 'skipped')}>Bỏ qua</button>`}>
         <${TierPill} n=${s.n} settings=${settings} /> <span>${s.n} giải cùng Fairplay</span><//>`)}
     <//>

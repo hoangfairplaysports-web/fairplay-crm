@@ -24,7 +24,7 @@ const SYSTEM_TYPES = { stage: { label: 'Đổi giai đoạn', icon: '➡️' }, 
   prospect: { label: 'Tìm khách mới', icon: '🎯' } };
 export const activityType = (id) => ACTIVITY_TYPES.find((t) => t.id === id) || SYSTEM_TYPES[id] || { label: id, icon: '•' };
 
-export const ROLES = { admin: 'Admin', manager: 'Trưởng KD', sales: 'Sale', accountant: 'Kế toán' };
+export const ROLES = { admin: 'Admin', manager: 'Trưởng KD', sales: 'Sale', accountant: 'Kế toán', marketing: 'Marketing' };
 
 export const DEFAULT_SETTINGS = {
   stale_days: 7,

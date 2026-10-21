@@ -70,7 +70,7 @@ export function Select({ value, onChange, options, placeholder, disabled }) {
   </select>`;
 }
 
-export const salesPeople = (profiles) => profiles.filter((p) => p.active && p.crm_access !== false && p.role !== 'accountant');
+export const salesPeople = (profiles) => profiles.filter((p) => p.active && p.crm_access !== false && !['accountant', 'marketing'].includes(p.role));
 
 export function Section({ title, count, tone, hint, empty, children }) {
   return html`<section class="section">

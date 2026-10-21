@@ -3,7 +3,7 @@ import { createStore } from './store.js';
 import * as U from './util.js';
 import { Modal, StagePill, FollowBadge, LastTouch, ContactButtons, Select, salesPeople, Section, FollowupInput, InlineText, initials } from './ui.js';
 import { CustomersView, CustomerDrawer, CareView, CareToday, ConvertLeadModal } from './customers.js';
-import { TABLES } from './store.js';
+import { TABLES, setReadOnly } from './store.js';
 import { TournamentsView, TournamentModal, EventStatusPill } from './tournaments.js';
 import { DeployView } from './deploy.js';
 import { ProfitView } from './profit.js';
@@ -47,6 +47,8 @@ function App() {
   const [ptouches, setPtouches] = useState([]);
   const setters = { customers: setCustomers, contacts: setContacts, events: setEvents, gifts: setGifts, prospect_touches: setPtouches };
   const [showPw, setShowPw] = useState(false);
+  const [viewAs, setViewAs] = useState(null);
+  const [pickRole, setPickRole] = useState(false);
   const [toast, setToast] = useState(null);
   const lastLoad = useRef(0);
 
@@ -98,12 +100,22 @@ function App() {
   if (!user.active)
     return html`<div class="splash">Tài khoản đã bị khoá. Liên hệ Admin.<br /><button class="btn" onClick=${() => store.signOut().then(() => setUser(null))}>Đăng xuất</button></div>`;
 
-  const isMgr = ['admin', 'manager'].includes(user.role);
-  const isAdmin = user.role === 'admin';
+  // Admin xem CRM với vai trò của một thành viên (chỉ xem): mọi quyền tính theo người đó
+  const realUser = user;
+  const actor = viewAs || user;
+  const isMgr = ['admin', 'manager'].includes(actor.role);
+  const isAdmin = actor.role === 'admin';
+  const isMkt = actor.role === 'marketing';
   // Quyền tài chính (tiền, giá nhập, lợi nhuận): cột profiles.finance_access; chưa chạy migration 03 thì theo Admin như cũ
-  const canFinance = user.finance_access ?? isAdmin;
+  const canFinance = actor.finance_access ?? isAdmin;
   // Nhập / sửa số tiền: Admin hoặc Kế toán
-  const canEditMoney = canFinance && (isAdmin || user.role === 'accountant');
+  const canEditMoney = canFinance && (isAdmin || actor.role === 'accountant');
+  // Marketing: lead kênh Marketing + lead của mình; đầu mối chỉ của doanh nghiệp tiềm năng; không có quà tặng (giống quyền trên máy chủ)
+  const mktLead = (l) => /^facebook/i.test(l.source || '') || l.source === 'Website' || l.created_by === actor.id || l.assignee_id === actor.id;
+  const leadsV = isMkt ? (leads || []).filter(mktLead) : leads || [];
+  const prospectIds = new Set(customers.filter((c) => c.p_status).map((c) => c.id));
+  const contactsV = isMkt ? contacts.filter((k) => prospectIds.has(k.customer_id)) : contacts;
+  const giftsV = isMkt ? [] : gifts;
   const people = Object.fromEntries(profiles.map((p) => [p.id, p]));
   const go = (v, preset) => {
     setListPreset(preset || null);
@@ -205,10 +217,10 @@ function App() {
   }
 
   const ctx = {
-    user, isMgr, isAdmin, canFinance, canEditMoney, profiles, people, leads: leads || [], settings, notify, go, listPreset,
+    user: actor, realUser, viewAs, isMgr, isAdmin, isMkt, canFinance, canEditMoney, profiles, people, leads: leadsV, settings, notify, go, listPreset,
     openLead: setOpenLeadId, updateLead, logActivity, createLead, bulkAssign, bulkStage, deleteLead, reload,
     setSettings, setProfiles, store,
-    customers, contacts, events, gifts, saveRow, removeRow, logCare, prospect_touches: ptouches,
+    customers, contacts: contactsV, events, gifts: giftsV, saveRow, removeRow, logCare, prospect_touches: ptouches,
     // Khách hàng để chăm sóc: bỏ doanh nghiệp tiềm năng chưa từng làm giải với Fairplay
     careCustomers: customers.filter((c) => !c.p_status || events.some((e) => e.customer_id === c.id)),
     openCustomer: (id) => { setOpenLeadId(null); setOpenCustomerId(id); },
@@ -217,7 +229,9 @@ function App() {
     openEvent: (x) => setEventModal(x && x.id ? { row: x } : { init: x || {} }),
   };
   ctx.openLead = (id) => { setOpenCustomerId(null); setOpenLeadId(id); };
-  const views = VIEWS.filter((v) => (!v.admin || isAdmin) && (!v.finance || canFinance));
+  const MKT_VIEWS = new Set(['prospect', 'list', 'pipeline', 'tournaments', 'customers']);
+  const views = VIEWS.filter((v) => (!v.admin || isAdmin) && (!v.finance || canFinance) && (!isMkt || MKT_VIEWS.has(v.id)) && (v.id !== 'reports' || !isMkt));
+  const cur = views.some((v) => v.id === view) ? view : views[0].id;
   const openLead = leads?.find((l) => l.id === openLeadId);
   const openCustomer = customers.find((c) => c.id === openCustomerId);
 
@@ -227,26 +241,28 @@ function App() {
       <div class="brand"><img src="assets/logo-mark.png" alt="Fairplay Sports" /><span class="wordmark"><b>FAIRPLAY</b><small>SPORTS · CRM</small></span></div>
       <a class="btn appswitch" href="https://hoangfairplaysports-web.github.io/fairplay-checklist/" title="Mở Fairplay Checklist (cùng tài khoản)">☑️ Checklist</a>
       <nav class="tabs">
-        ${views.map((v) => html`<a href=${'#/' + v.id} class=${view === v.id ? 'on' : ''} onClick=${(e) => { e.preventDefault(); go(v.id); }}><span class="ic">${v.icon}</span><span>${v.label}</span></a>`)}
+        ${views.map((v) => html`<a href=${'#/' + v.id} class=${cur === v.id ? 'on' : ''} onClick=${(e) => { e.preventDefault(); go(v.id); }}><span class="ic">${v.icon}</span><span>${v.label}</span></a>`)}
       </nav>
       <div class="top-actions">
         <button class="btn primary" onClick=${() => setShowNew(true)}>＋ <span class="hide-sm">Lead mới</span></button>
-        <${UserMenu} user=${user} onPw=${() => setShowPw(true)} onLogout=${async () => { await store.signOut(); setUser(null); }} />
+        <${UserMenu} user=${user} onPw=${() => setShowPw(true)} onViewAs=${user.role === 'admin' ? () => setPickRole(true) : null} onLogout=${async () => { setReadOnly(false); await store.signOut(); setUser(null); }} />
       </div>
     </header>
+    ${viewAs && html`<div class="viewas-bar">👁 Đang xem CRM như <b>${viewAs.full_name}</b> (${U.ROLES[viewAs.role] || viewAs.role}${viewAs.finance_access ? ', có quyền tài chính' : ''}). Chỉ xem: mọi thay đổi sẽ không được lưu.
+      <button class="btn sm" onClick=${() => setPickRole(true)}>Đổi người</button><button class="btn sm primary" onClick=${() => { setReadOnly(false); setViewAs(null); }}>Thoát chế độ xem</button></div>`}
     <main class="main">
       ${leads === null
         ? html`<div class="splash">Đang tải dữ liệu…</div>`
-        : view === 'list' ? html`<${ListView} ctx=${ctx} key=${JSON.stringify(listPreset)} />`
-        : view === 'prospect' ? html`<${ProspectView} ctx=${ctx} key=${JSON.stringify(listPreset)} />`
-        : view === 'pipeline' ? html`<${PipelineView} ctx=${ctx} />`
-        : view === 'reports' ? html`<${ReportsView} ctx=${ctx} />`
-        : view === 'customers' ? html`<${CustomersView} ctx=${ctx} />`
-        : view === 'tournaments' ? html`<${TournamentsView} ctx=${ctx} />`
-        : view === 'deploy' ? html`<${DeployView} ctx=${ctx} />`
-        : view === 'profit' && canFinance ? html`<${ProfitView} ctx=${ctx} />`
-        : view === 'care' ? html`<${CareView} ctx=${ctx} />`
-        : view === 'settings' && isAdmin ? html`<${SettingsView} ctx=${ctx} />`
+        : cur === 'list' ? html`<${ListView} ctx=${ctx} key=${JSON.stringify(listPreset)} />`
+        : cur === 'prospect' ? html`<${ProspectView} ctx=${ctx} key=${JSON.stringify(listPreset)} />`
+        : cur === 'pipeline' ? html`<${PipelineView} ctx=${ctx} />`
+        : cur === 'reports' ? html`<${ReportsView} ctx=${ctx} />`
+        : cur === 'customers' ? html`<${CustomersView} ctx=${ctx} />`
+        : cur === 'tournaments' ? html`<${TournamentsView} ctx=${ctx} />`
+        : cur === 'deploy' ? html`<${DeployView} ctx=${ctx} />`
+        : cur === 'profit' && canFinance ? html`<${ProfitView} ctx=${ctx} />`
+        : cur === 'care' ? html`<${CareView} ctx=${ctx} />`
+        : cur === 'settings' && isAdmin ? html`<${SettingsView} ctx=${ctx} />`
         : html`<${TodayView} ctx=${ctx} />`}
     </main>
     ${openLead && html`<${LeadDrawer} ctx=${ctx} lead=${openLead} onClose=${() => setOpenLeadId(null)} key=${openLead.id} />`}
@@ -255,8 +271,27 @@ function App() {
     ${convertLead && html`<${ConvertLeadModal} ctx=${ctx} lead=${convertLead} onClose=${() => setConvertLead(null)} />`}
     ${eventModal && html`<${TournamentModal} ctx=${ctx} row=${eventModal.row && events.find((e) => e.id === eventModal.row.id)} init=${eventModal.init} onClose=${() => setEventModal(null)} />`}
     ${showPw && html`<${PasswordModal} onClose=${() => setShowPw(false)} notify=${notify} />`}
+    ${pickRole && html`<${ViewAsModal} profiles=${profiles} me=${user} onClose=${() => setPickRole(false)} onPick=${(p) => { setPickRole(false); setOpenLeadId(null); setOpenCustomerId(null); setReadOnly(!!p); setViewAs(p); }} />`}
     ${toast && html`<div class=${'toast ' + toast.type} key=${toast.k}>${toast.msg}</div>`}
   `;
+}
+
+// Admin chọn thành viên để xem CRM theo đúng quyền của người đó
+function ViewAsModal({ profiles, me, onClose, onPick }) {
+  const list = profiles.filter((p) => p.active && p.crm_access !== false && p.id !== me.id).sort((a, b) => (a.role || '').localeCompare(b.role || '') || a.full_name.localeCompare(b.full_name, 'vi'));
+  const WHAT = {
+    manager: 'Toàn bộ lead, giao lead, báo cáo đội; không vào Cài đặt',
+    sales: 'Toàn bộ lead và khách hàng, tìm khách mới; số liệu tìm khách chỉ của mình',
+    accountant: 'Toàn bộ số tiền, nhập thu chi, giá nhập, nghiệm thu, chi phí tháng',
+    marketing: 'Tìm khách mới (doanh nghiệp mình phụ trách), lead kênh Marketing (chỉ xem), khách hàng và giải đấu (chỉ xem, ẩn SĐT/email khách cũ)',
+    admin: 'Toàn quyền',
+  };
+  return html`<${Modal} title="Xem CRM với vai trò của thành viên" onClose=${onClose}>
+    <p class="muted small">Bạn sẽ thấy CRM đúng như người đó thấy (menu, dữ liệu, nút bấm). Chế độ này chỉ để xem: không lưu được thay đổi nào.</p>
+    <div class="minilist">${list.map((p) => html`<button class="mini click viewas-pick" key=${p.id} onClick=${() => onPick(p)}>
+      <div class="mini-main"><b>${p.full_name}</b> <span class="badge">${U.ROLES[p.role] || p.role}</span>${p.finance_access ? html` <span class="badge ok">Tài chính</span>` : ''}
+        <div class="muted small">${WHAT[p.role] || ''}</div></div></button>`)}</div>
+  <//>`;
 }
 
 function DemoBar({ user, profiles, onSwitch, onReset }) {
@@ -269,12 +304,13 @@ function DemoBar({ user, profiles, onSwitch, onReset }) {
   </div>`;
 }
 
-function UserMenu({ user, onPw, onLogout }) {
+function UserMenu({ user, onPw, onLogout, onViewAs }) {
   const [open, setOpen] = useState(false);
   return html`<div class="usermenu">
     <button class="avatar" title=${user.full_name} onClick=${() => setOpen(!open)}>${initials(user.full_name)}</button>
     ${open && html`<div class="menu" onMouseLeave=${() => setOpen(false)}>
       <div class="menu-head"><b>${user.full_name}</b><small>${user.email} · ${U.ROLES[user.role]}</small></div>
+      ${onViewAs && html`<button onClick=${() => { setOpen(false); onViewAs(); }}>👁 Xem với vai trò thành viên…</button>`}
       ${store.mode === 'live' && html`<button onClick=${() => { setOpen(false); onPw(); }}>Đổi mật khẩu</button>`}
       <button onClick=${onLogout}>Đăng xuất</button>
     </div>`}
@@ -725,6 +761,7 @@ function LeadDrawer({ ctx, lead, onClose }) {
         <button class="x" onClick=${onClose} aria-label="Đóng">×</button>
       </div>
       <div class="drawer-body">
+        ${ctx.isMkt && lead.created_by !== ctx.user.id && lead.assignee_id !== ctx.user.id && html`<p class="note">Lead từ kênh Marketing: bạn chỉ xem để đánh giá chất lượng lead, không sửa được.</p>`}
         ${dups.length > 0 && html`<div class="dupwarn">⚠ Có thể trùng với: ${dups.slice(0, 3).map((d) => html`<button class="link" onClick=${() => openLead(d.id)}>${d.name}${d.company ? ' (' + d.company + ')' : ''}</button> `)}</div>`}
         ${lead.stage === 'won' && !lead.customer_id && html`<div class="suggest">🎉 Lead đã chốt nhưng chưa lưu vào <b>Khách hàng</b> — lưu để theo dõi giải, chăm sóc & tặng quà về sau. <button class="btn sm" onClick=${() => startConvert(lead)}>Lưu vào khách hàng</button></div>`}
         ${cus && html`<div class="note">🏢 Thuộc khách hàng <button class="link" onClick=${() => openCustomer(cus.id)}>${cus.name}</button></div>`}

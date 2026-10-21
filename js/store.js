@@ -2,8 +2,47 @@ import { CONFIG } from './config.js';
 import { DEFAULT_SETTINGS, addDays, isOpen, normalizePhone, uid } from './util.js';
 
 export async function createStore() {
-  if (CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) return createSupabaseStore();
-  return createDemoStore();
+  if (CONFIG.SUPABASE_URL && CONFIG.SUPABASE_ANON_KEY) return guardStore(await createSupabaseStore());
+  return guardStore(createDemoStore());
+}
+
+// Admin "xem với vai trò khác": chỉ xem, mọi thao tác ghi bị chặn ở đây (cả store lẫn Supabase client dùng trực tiếp)
+let READ_ONLY = false;
+export const setReadOnly = (v) => {
+  READ_ONLY = !!v;
+};
+const RO_MSG = 'Đang xem thử với vai trò khác: thay đổi không được lưu';
+const MUTATE = ['createLead', 'updateLead', 'deleteLead', 'addActivity', 'insert', 'update', 'remove', 'updateSettings', 'importLeads', 'updateProfile', 'adminUser', 'changePassword', 'addProfile', 'resetDemo'];
+function guardStore(s) {
+  for (const k of MUTATE)
+    if (typeof s[k] === 'function') {
+      const f = s[k].bind(s);
+      s[k] = (...a) => (READ_ONLY ? Promise.reject(new Error(RO_MSG)) : f(...a));
+    }
+  if (s.sb) s.sb = guardSb(s.sb);
+  return s;
+}
+function guardSb(sb) {
+  const denied = () => {
+    const p = { then: (res, rej) => Promise.resolve({ data: null, error: { message: RO_MSG } }).then(res, rej) };
+    for (const m of ['select', 'eq', 'neq', 'in', 'is', 'not', 'match', 'single', 'maybeSingle', 'order']) p[m] = () => p;
+    return p;
+  };
+  const wrap = (obj, blocked) => new Proxy(obj, {
+    get(t, k) {
+      if (READ_ONLY && blocked.includes(k)) return () => denied();
+      const v = t[k];
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+  });
+  return new Proxy(sb, {
+    get(t, k) {
+      if (k === 'from') return (table) => wrap(t.from(table), ['insert', 'update', 'upsert', 'delete']);
+      if (k === 'storage') return { from: (b) => wrap(t.storage.from(b), ['upload', 'remove', 'update', 'move']) };
+      const v = t[k];
+      return typeof v === 'function' ? v.bind(t) : v;
+    },
+  });
 }
 
 const FIELDS = {
@@ -164,7 +203,7 @@ function mergeSettings(s) {
 // ---------------------------------------------------------------------------
 // Demo (dữ liệu mẫu, lưu localStorage của trình duyệt)
 // ---------------------------------------------------------------------------
-const DEMO_KEY = 'fpcrm_demo_v4';
+const DEMO_KEY = 'fpcrm_demo_v5';
 
 function createDemoStore() {
   let db = load() || seed();
@@ -368,6 +407,7 @@ function seed() {
     P('trang', 'Trang', 'sales'),
     P('hieu', 'Hiếu', 'sales'),
     { ...P('ketoan', 'Kế toán Lan', 'accountant'), finance_access: true },
+    P('linh', 'Linh (Marketing)', 'marketing'),
   ];
   const ago = (days, h = 9) => {
     const d = new Date();
@@ -484,6 +524,7 @@ function seed() {
   customers.push(
     PR('P1', 'Ngân hàng Demo Phương Đông', 'Ngân hàng trong nước', 'A', 'minh', 'touching', 1200, { first_touch_at: ago(3), signal: 'Kỷ niệm 30 năm thành lập', website: 'demo-phuongdong.vn' }),
     PR('P2', 'Chứng khoán Demo Sao Mai', 'Chứng khoán', 'B', 'minh', 'new', 300),
+    PR('P5', 'Tập đoàn Demo Hoà Bình', 'Sản xuất, bán lẻ, tập đoàn', 'A', 'linh', 'new', 5000),
     PR('P3', 'Phần mềm Demo Rikkei', 'Công nghệ, phần mềm', null, 'vu', 'new', 800),
     PR('P4', 'Bảo hiểm Demo An Phúc', 'Bảo hiểm', 'A', 'vu', 'meeting', 2000, { first_touch_at: ago(9), replied_at: ago(2), meeting_at: ago(1) }),
   );
@@ -501,7 +542,7 @@ function seed() {
     industries: [
       { name: 'Ngân hàng trong nước', owners: ['minh', 'vu'], en: false }, { name: 'Chứng khoán', owners: ['minh'], en: false },
       { name: 'Bảo hiểm', owners: ['vu'], en: false }, { name: 'Công nghệ, phần mềm', owners: ['vu'], en: false },
-      { name: 'Văn phòng công ty nước ngoài', owners: ['trang'], en: true }, { name: 'Sản xuất, bán lẻ, tập đoàn', owners: ['hieu'], en: false },
+      { name: 'Văn phòng công ty nước ngoài', owners: ['trang'], en: true }, { name: 'Sản xuất, bán lẻ, tập đoàn', owners: ['linh'], en: false },
     ],
     prospect_targets: { minh: { companies: 10, meetings: 1.5 }, vu: { companies: 5, meetings: 0.5 }, trang: { companies: 10, meetings: 2 }, hieu: { companies: 5, meetings: 0.5 } },
   };

@@ -384,3 +384,8 @@ tr.dim td { color: var(--muted); }
 .badge:not(.bad):not(.warn):not(.ok):not(.info) { background: #eef3f8; color: var(--muted); }
 .cost-cell { display: flex; align-items: center; gap: 4px; justify-content: flex-end; }
 tr.on-row td { background: var(--brand-soft); }
+
+/* Admin xem với vai trò thành viên */
+.viewas-bar { position: sticky; top: 0; z-index: 30; display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 16px; background: #fff4e0; color: #7a3e00; border-bottom: 1px solid #ffd59a; font-size: 13.5px; }
+.viewas-pick { width: 100%; text-align: left; background: none; border: 1px solid var(--line); border-radius: 8px; margin-bottom: 6px; cursor: pointer; font: inherit; }
+.viewas-pick:hover { border-color: var(--brand); background: var(--brand-soft); }

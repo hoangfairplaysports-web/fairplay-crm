@@ -90,7 +90,7 @@ export function TournamentsView({ ctx }) {
           <button class=${tab === 'all' ? 'on' : ''} onClick=${() => setTab('all')}>Tất cả</button>
         </div>
         <button class="btn" onClick=${exportCsv}>⬇ Xuất CSV</button>
-        <button class="btn primary" onClick=${() => openEvent({})}>＋ Giải đấu</button>
+        ${!ctx.isMkt && html`<button class="btn primary" onClick=${() => openEvent({})}>＋ Giải đấu</button>`}
       </div>
     </div>
     <div class="status-chips">
@@ -207,7 +207,7 @@ export function TournamentModal({ ctx, row, init = {}, onClose }) {
       ${err && html`<div class="err">${err}</div>`}
       <div class="row end">
         ${row && isMgr && html`<button type="button" class="link danger" style="margin-right:auto" onClick=${async () => { if (confirm(`Xoá giải "${row.name}"?`)) { try { await removeRow('events', row.id); notify('Đã xoá giải'); onClose(); } catch (e) { setErr(e.message); } } }}>Xoá giải</button>`}
-        <button type="button" class="btn" onClick=${onClose}>Huỷ</button><button class="btn primary" disabled=${busy}>${busy ? 'Đang lưu…' : 'Lưu'}</button>
+        <button type="button" class="btn" onClick=${onClose}>${ctx.isMkt ? 'Đóng' : 'Huỷ'}</button>${!ctx.isMkt && html`<button class="btn primary" disabled=${busy}>${busy ? 'Đang lưu…' : 'Lưu'}</button>`}
       </div>
     </form>
   <//>`;
