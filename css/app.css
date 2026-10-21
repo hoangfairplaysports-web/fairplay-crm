@@ -361,3 +361,24 @@ tr.dim td { color: var(--muted); }
 
 /* Lợi nhuận tháng: biểu đồ 12 tháng */
 .chart12 svg { width: 100%; height: auto; display: block; }
+
+/* Tìm khách mới */
+.tier-pill { display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 6px; font-size: 12px; font-weight: 700; background: #eef3f8; color: var(--muted); vertical-align: middle; }
+.tier-pill.tA { background: var(--accent); color: #fff; }
+.tier-pill.tB { background: var(--brand); color: #fff; }
+.tier-pill.tC { background: #cbd5e1; color: #334155; }
+.status-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 4px 0 10px; }
+.btn.on { background: var(--brand-soft); border-color: var(--brand); color: var(--brand-2); }
+.pcontact { margin-bottom: 10px; }
+.seq { list-style: none; margin: 10px 0 0; padding: 0; display: grid; gap: 6px; }
+.seq li { display: flex; align-items: center; gap: 10px; padding: 6px 8px; border-radius: 8px; border: 1px solid var(--line); }
+.seq li.done { background: var(--ok-bg); border-color: transparent; }
+.seq li.skip { opacity: .55; }
+.seq li.late { border-color: var(--bad); background: var(--bad-bg); }
+.seq li.next { border-color: var(--brand); }
+.seq-n { flex: none; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; font-size: 12px; font-weight: 700; background: #fff; border: 1px solid var(--line); }
+.seq li.done .seq-n { background: var(--ok); color: #fff; border-color: var(--ok); }
+.seq-b { flex: 1; min-width: 0; }
+.ok-text { color: var(--ok); font-weight: 600; }
+.kpi b small { font-size: 14px; font-weight: 500; }
+.badge:not(.bad):not(.warn):not(.ok):not(.info) { background: #eef3f8; color: var(--muted); }

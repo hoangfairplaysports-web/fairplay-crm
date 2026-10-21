@@ -7,6 +7,7 @@ import { TABLES } from './store.js';
 import { TournamentsView, TournamentModal, EventStatusPill } from './tournaments.js';
 import { DeployView } from './deploy.js';
 import { ProfitView } from './profit.js';
+import { ProspectView, TodayList as ProspectTodayList } from './prospect.js';
 
 let store;
 
@@ -15,6 +16,7 @@ let store;
 // ---------------------------------------------------------------------------
 const VIEWS = [
   { id: 'today', label: 'Hôm nay', icon: '☀️' },
+  { id: 'prospect', label: 'Tìm khách mới', icon: '🎯' },
   { id: 'list', label: 'Danh sách', icon: '📋' },
   { id: 'pipeline', label: 'Pipeline', icon: '🗂️' },
   { id: 'tournaments', label: 'Giải đấu', icon: '🏆' },
@@ -42,7 +44,8 @@ function App() {
   const [contacts, setContacts] = useState([]);
   const [events, setEvents] = useState([]);
   const [gifts, setGifts] = useState([]);
-  const setters = { customers: setCustomers, contacts: setContacts, events: setEvents, gifts: setGifts };
+  const [ptouches, setPtouches] = useState([]);
+  const setters = { customers: setCustomers, contacts: setContacts, events: setEvents, gifts: setGifts, prospect_touches: setPtouches };
   const [showPw, setShowPw] = useState(false);
   const [toast, setToast] = useState(null);
   const lastLoad = useRef(0);
@@ -138,7 +141,7 @@ function App() {
     await store.remove(table, id);
     setters[table]((xs) => xs.filter((x) => x.id !== id));
     if (table === 'customers') {
-      for (const t of ['contacts', 'events', 'gifts']) setters[t]((xs) => xs.filter((x) => x.customer_id !== id));
+      for (const t of ['contacts', 'events', 'gifts', 'prospect_touches']) setters[t]((xs) => xs.filter((x) => x.customer_id !== id));
       setLeads((ls) => ls.map((l) => (l.customer_id === id ? { ...l, customer_id: null } : l)));
       setOpenCustomerId(null);
     }
@@ -205,7 +208,9 @@ function App() {
     user, isMgr, isAdmin, canFinance, canEditMoney, profiles, people, leads: leads || [], settings, notify, go, listPreset,
     openLead: setOpenLeadId, updateLead, logActivity, createLead, bulkAssign, bulkStage, deleteLead, reload,
     setSettings, setProfiles, store,
-    customers, contacts, events, gifts, saveRow, removeRow, logCare,
+    customers, contacts, events, gifts, saveRow, removeRow, logCare, prospect_touches: ptouches,
+    // Khách hàng để chăm sóc: bỏ doanh nghiệp tiềm năng chưa từng làm giải với Fairplay
+    careCustomers: customers.filter((c) => !c.p_status || events.some((e) => e.customer_id === c.id)),
     openCustomer: (id) => { setOpenLeadId(null); setOpenCustomerId(id); },
     startNewLead: (init) => setShowNew(init || true),
     startConvert: setConvertLead,
@@ -233,6 +238,7 @@ function App() {
       ${leads === null
         ? html`<div class="splash">Đang tải dữ liệu…</div>`
         : view === 'list' ? html`<${ListView} ctx=${ctx} key=${JSON.stringify(listPreset)} />`
+        : view === 'prospect' ? html`<${ProspectView} ctx=${ctx} key=${JSON.stringify(listPreset)} />`
         : view === 'pipeline' ? html`<${PipelineView} ctx=${ctx} />`
         : view === 'reports' ? html`<${ReportsView} ctx=${ctx} />`
         : view === 'customers' ? html`<${CustomersView} ctx=${ctx} />`
@@ -406,6 +412,8 @@ function TodayView({ ctx }) {
       ${stale.slice(0, 15).map((l) => html`<${LeadRow} ctx=${ctx} lead=${l} key=${l.id} />`)}
       ${stale.length > 15 && html`<button class="link more" onClick=${() => go('list', { flag: 'stale', mine: scope === 'mine' })}>Xem tất cả ${stale.length} lead →</button>`}
     <//>
+    ${ctx.prospect_touches.length > 0 && html`<div class="section-head"><h3>🎯 Tìm khách mới</h3><button class="link" onClick=${() => go('prospect')}>Mở mục Tìm khách mới →</button></div>
+      <${ProspectTodayList} ctx=${ctx} who=${scope === 'mine' ? user.id : ''} onOpen=${(id) => go('prospect', { open: id })} compact />`}
     <${CareToday} ctx=${ctx} scope=${scope} />
     ${isMgr && html`<${TeamTable} ctx=${ctx} />`}
   </div>`;

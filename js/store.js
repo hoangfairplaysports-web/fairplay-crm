@@ -9,17 +9,23 @@ export async function createStore() {
 const FIELDS = {
   leads: ['name', 'company', 'customer_type', 'phone', 'email', 'facebook', 'source', 'need', 'region', 'headcount', 'event_time',
     'stage', 'lost_reason', 'assignee_id', 'next_followup', 'notes', 'created_at', 'last_activity_at', 'customer_id'],
-  customers: ['name', 'customer_type', 'industry', 'region', 'address', 'notes', 'owner_id', 'next_care', 'last_care_at', 'created_at'],
-  contacts: ['customer_id', 'name', 'title', 'gender', 'phone', 'email', 'facebook', 'birthday', 'is_primary', 'notes'],
+  customers: ['name', 'customer_type', 'industry', 'region', 'address', 'notes', 'owner_id', 'next_care', 'last_care_at', 'created_at',
+    'tier', 'staff_size', 'website', 'linkedin', 'north_office', 'p_source', 'signal', 'signal_date', 'event_season', 'budget_month',
+    'p_status', 'p_added_at', 'first_touch_at', 'replied_at', 'meeting_at', 'brief_at', 'recall_month', 'unfit_reason', 'do_not_contact'],
+  contacts: ['customer_id', 'name', 'title', 'gender', 'phone', 'email', 'facebook', 'birthday', 'is_primary', 'notes',
+    'role_level', 'linkedin', 'li_connected', 'info_source', 'seq_started_at', 'seq_status', 'replied_at', 'do_not_contact'],
+  prospect_touches: ['customer_id', 'contact_id', 'step', 'day_no', 'channel', 'template_key', 'due_date', 'done_at', 'done_by', 'skipped', 'note'],
   events: ['customer_id', 'lead_id', 'name', 'sport', 'event_date', 'date_text', 'venue', 'headcount', 'status', 'phase', 'pic_id', 'notes', 'next_action', 'link'],
   gifts: ['customer_id', 'contact_id', 'occasion', 'occasion_key', 'gift', 'gift_date', 'status', 'notes'],
 };
-export const TABLES = ['customers', 'contacts', 'events', 'gifts'];
+export const TABLES = ['customers', 'contacts', 'events', 'gifts', 'prospect_touches'];
 function clean(table, d) {
   const out = {};
   for (const k of FIELDS[table]) if (k in d) out[k] = d[k] === '' ? null : d[k];
   if ('phone' in out) out.phone = normalizePhone(out.phone) || null;
   if ('headcount' in out) out.headcount = out.headcount == null ? null : parseInt(out.headcount, 10) || null;
+  if ('staff_size' in out) out.staff_size = out.staff_size == null ? null : parseInt(out.staff_size, 10) || null;
+  for (const k of ['li_connected', 'do_not_contact', 'skipped']) if (k in out) out[k] = !!out[k];
   return out;
 }
 const cleanLead = (d) => clean('leads', d);
@@ -158,10 +164,11 @@ function mergeSettings(s) {
 // ---------------------------------------------------------------------------
 // Demo (dữ liệu mẫu, lưu localStorage của trình duyệt)
 // ---------------------------------------------------------------------------
-const DEMO_KEY = 'fpcrm_demo_v3';
+const DEMO_KEY = 'fpcrm_demo_v4';
 
 function createDemoStore() {
   let db = load() || seed();
+  db.prospect_touches ||= [];
   function load() {
     try {
       return JSON.parse(localStorage.getItem(DEMO_KEY));
@@ -312,17 +319,17 @@ function createDemoStore() {
       need();
       const r = db[table].find((x) => x.id === id);
       const p = clean(table, patch);
-      if (table === 'customers' && 'owner_id' in p && p.owner_id !== r.owner_id && !isMgr())
+      if (table === 'customers' && 'owner_id' in p && p.owner_id !== r.owner_id && !isMgr() && !(r.p_status && r.owner_id === me().id))
         throw new Error('Chỉ Trưởng KD hoặc Admin được giao người phụ trách khách hàng');
       Object.assign(r, p, ['customers', 'events'].includes(table) ? { updated_at: new Date().toISOString() } : {});
       save();
       return copy(r);
     },
     async remove(table, id) {
-      if (!isMgr()) throw new Error('Chỉ Trưởng KD hoặc Admin được xoá');
+      if (!isMgr() && table !== 'prospect_touches') throw new Error('Chỉ Trưởng KD hoặc Admin được xoá');
       db[table] = db[table].filter((x) => x.id !== id);
       if (table === 'customers') {
-        for (const t of ['contacts', 'events', 'gifts']) db[t] = db[t].filter((x) => x.customer_id !== id);
+        for (const t of ['contacts', 'events', 'gifts', 'prospect_touches']) db[t] = db[t].filter((x) => x.customer_id !== id);
         db.activities = db.activities.filter((a) => a.customer_id !== id);
         for (const l of db.leads) if (l.customer_id === id) l.customer_id = null;
       }
@@ -469,5 +476,34 @@ function seed() {
   leads.find((l) => l.id === 'L11').customer_id = 'C8';
   for (const c of customers)
     activities.push({ id: uid(), lead_id: null, customer_id: c.id, type: 'call', content: 'Gọi hỏi thăm, cập nhật kế hoạch hoạt động nội bộ', created_by: c.owner_id, created_at: c.last_care_at });
-  return { profiles, leads, activities, customers, contacts, events, gifts, settings: {}, currentUserId: null };
+  // Tìm khách mới (hư cấu)
+  const PR = (id, name, industry, tier, owner_id, p_status, staff_size, x = {}) => ({
+    id, name, industry, tier, owner_id, p_status, staff_size, customer_type: 'Doanh nghiệp', region: 'Hà Nội', north_office: true, p_source: 'Danh sách',
+    p_added_at: ago(10), last_care_at: ago(10), created_at: ago(10), updated_at: ago(1), created_by: 'hoang', notes: '', ...x,
+  });
+  customers.push(
+    PR('P1', 'Ngân hàng Demo Phương Đông', 'Ngân hàng trong nước', 'A', 'minh', 'touching', 1200, { first_touch_at: ago(3), signal: 'Kỷ niệm 30 năm thành lập', website: 'demo-phuongdong.vn' }),
+    PR('P2', 'Chứng khoán Demo Sao Mai', 'Chứng khoán', 'B', 'minh', 'new', 300),
+    PR('P3', 'Phần mềm Demo Rikkei', 'Công nghệ, phần mềm', null, 'vu', 'new', 800),
+    PR('P4', 'Bảo hiểm Demo An Phúc', 'Bảo hiểm', 'A', 'vu', 'meeting', 2000, { first_touch_at: ago(9), replied_at: ago(2), meeting_at: ago(1) }),
+  );
+  contacts.push(
+    { ...K('PK1', 'P1', 'Nguyễn Thu Trang', 'Chuyên viên C&B', 'Nữ', 11, null), role_level: 1, linkedin: 'https://linkedin.com/in/demo1', info_source: 'LinkedIn', seq_started_at: ago(3), seq_status: 'running' },
+    { ...K('PK2', 'P1', 'Lê Hoàng Phúc', 'Trưởng phòng Nhân sự', 'Nam', 12, null, false), role_level: 2, info_source: 'LinkedIn' },
+    { ...K('PK3', 'P4', 'Trần Mai Anh', 'HR Business Partner', 'Nữ', 13, null), role_level: 1, info_source: 'LinkedIn', seq_started_at: ago(9), seq_status: 'stopped', replied_at: ago(2) },
+  );
+  const steps = [[1, 1, 'linkedin', 'A'], [2, 2, 'email', 'B'], [3, 5, 'email', 'D'], [4, 8, 'call', 'E'], [5, 14, 'email', 'F']];
+  const prospect_touches = steps.map(([step, day, channel, tpl], i) => ({
+    id: 'T' + step, customer_id: 'P1', contact_id: 'PK1', step, day_no: day, channel, template_key: tpl, due_date: addDays(day - 1 - 3),
+    done_at: step === 1 ? ago(3) : null, done_by: step === 1 ? 'minh' : null, skipped: false, note: null, created_at: ago(3),
+  }));
+  const settings = {
+    industries: [
+      { name: 'Ngân hàng trong nước', owners: ['minh', 'vu'], en: false }, { name: 'Chứng khoán', owners: ['minh'], en: false },
+      { name: 'Bảo hiểm', owners: ['vu'], en: false }, { name: 'Công nghệ, phần mềm', owners: ['vu'], en: false },
+      { name: 'Văn phòng công ty nước ngoài', owners: ['trang'], en: true }, { name: 'Sản xuất, bán lẻ, tập đoàn', owners: ['hieu'], en: false },
+    ],
+    prospect_targets: { minh: { companies: 10, meetings: 1.5 }, vu: { companies: 5, meetings: 0.5 }, trang: { companies: 10, meetings: 2 }, hieu: { companies: 5, meetings: 0.5 } },
+  };
+  return { profiles, leads, activities, customers, contacts, events, gifts, prospect_touches, settings, currentUserId: null };
 }

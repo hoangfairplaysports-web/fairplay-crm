@@ -17,9 +17,11 @@ export const ACTIVITY_TYPES = [
   { id: 'email', label: 'Email', icon: '✉️' },
   { id: 'meeting', label: 'Gặp / Họp', icon: '🤝' },
   { id: 'quote', label: 'Gửi báo giá / Profile', icon: '📄' },
+  { id: 'linkedin', label: 'LinkedIn', icon: '🔗' },
   { id: 'note', label: 'Ghi chú', icon: '📝' },
 ];
-const SYSTEM_TYPES = { stage: { label: 'Đổi giai đoạn', icon: '➡️' }, assign: { label: 'Giao lead', icon: '👤' }, create: { label: 'Tạo mới', icon: '✨' } };
+const SYSTEM_TYPES = { stage: { label: 'Đổi giai đoạn', icon: '➡️' }, assign: { label: 'Giao lead', icon: '👤' }, create: { label: 'Tạo mới', icon: '✨' },
+  prospect: { label: 'Tìm khách mới', icon: '🎯' } };
 export const activityType = (id) => ACTIVITY_TYPES.find((t) => t.id === id) || SYSTEM_TYPES[id] || { label: id, icon: '•' };
 
 export const ROLES = { admin: 'Admin', manager: 'Trưởng KD', sales: 'Sale', accountant: 'Kế toán' };
@@ -42,6 +44,19 @@ export const DEFAULT_SETTINGS = {
   vip_threshold: 4,
   season_days: 90,
   // date: "MM-DD" (lặp hằng năm) hoặc "YYYY-MM-DD" (lễ âm lịch — cập nhật mỗi năm)
+  // Tìm khách mới: ngành + người phụ trách (owners: id profile), chỉ tiêu theo người, mẫu tin nhắn
+  industries: [
+    { name: 'Ngân hàng trong nước', owners: [], en: false },
+    { name: 'Chứng khoán', owners: [], en: false },
+    { name: 'Bảo hiểm', owners: [], en: false },
+    { name: 'Công nghệ, phần mềm', owners: [], en: false },
+    { name: 'Văn phòng công ty nước ngoài', owners: [], en: true },
+    { name: 'Ngân hàng nước ngoài', owners: [], en: true },
+    { name: 'Nhà máy trong khu công nghiệp', owners: [], en: true },
+    { name: 'Sản xuất, bán lẻ, tập đoàn', owners: [], en: false },
+  ],
+  prospect_targets: {},
+  msg_templates: null,
   occasions: [
     { key: 'tet', label: 'Tết Nguyên Đán', date: '2027-02-06', before: 45, for: 'all' },
     { key: 'trungthu', label: 'Trung thu', date: '2027-09-15', before: 21, for: 'all' },

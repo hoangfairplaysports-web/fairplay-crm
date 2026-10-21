@@ -43,7 +43,7 @@ function occasionKey(settings, occasion, date) {
 // Danh sách khách hàng
 // ---------------------------------------------------------------------------
 export function CustomersView({ ctx }) {
-  const { customers, events, profiles, people, settings, user, openCustomer } = ctx;
+  const { careCustomers: customers, events, profiles, people, settings, user, openCustomer } = ctx;
   const [q, setQ] = useState('');
   const [owner, setOwner] = useState('');
   const [tier, setTier] = useState('');
@@ -458,7 +458,7 @@ export function ConvertLeadModal({ ctx, lead, onClose }) {
 // Chăm sóc & Quà tặng
 // ---------------------------------------------------------------------------
 export function CareView({ ctx }) {
-  const { customers, contacts, events, gifts, leads, settings, user, isMgr, people, openCustomer, startNewLead, saveRow, notify } = ctx;
+  const { careCustomers: customers, contacts, events, gifts, leads, settings, user, isMgr, people, openCustomer, startNewLead, saveRow, notify } = ctx;
   const [scope, setScope] = useState(isMgr ? 'all' : 'mine');
   const [horizon, setHorizon] = useState(0);
   const [modal, setModal] = useState(null);
@@ -571,7 +571,7 @@ export function CareView({ ctx }) {
 
 // Khối nhắc trên trang "Hôm nay"
 export function CareToday({ ctx, scope }) {
-  const { customers, settings, user, events, go, openCustomer, people } = ctx;
+  const { careCustomers: customers, settings, user, events, go, openCustomer, people } = ctx;
   const cs = customers.filter((c) => scope === 'all' || c.owner_id === user.id);
   const due = cs.filter((c) => U.customerFlags(c, settings).due).sort((a, b) => a.next_care.localeCompare(b.next_care));
   return html`<${Section} title="Chăm sóc khách cũ" count=${due.length} tone="warn" hint=${html`<button class="link" onClick=${() => go('care')}>Mở trang Chăm sóc & Quà tặng →</button>`} empty="Không có khách đến hạn chăm sóc">
