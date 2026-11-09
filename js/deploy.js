@@ -320,7 +320,7 @@ function Overview({ ctx, ev, data, h, reload }) {
 // Đổi ngày giải → dời hạn các việc chưa xong theo mốc D
 async function shiftTasks(ctx, eventId, newDate) {
   const sb = ctx.store.sb;
-  const { data } = await sb.from('ev_tasks').select('id, offset_days, status').eq('event_id', eventId).neq('status', 'done').not('offset_days', 'is', null);
+  const { data } = await sb.from('ev_tasks').select('id, offset_days, status').eq('event_id', eventId).neq('status', 'done').not('offset_days', 'is', null).is('stage', null); // việc của chặng có ngày D riêng → không dời theo ngày giải
   await Promise.all((data || []).map((t) => sb.from('ev_tasks').update({ due_date: addDays(newDate, t.offset_days) }).eq('id', t.id)));
   ctx.notify(`Đã dời hạn ${data?.length || 0} việc theo ngày giải mới`);
 }

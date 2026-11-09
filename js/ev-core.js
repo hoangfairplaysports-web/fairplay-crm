@@ -15,7 +15,7 @@ const num = (v) => {
 };
 const ROMAN = /^(i|ii|iii|iv|v|vi|vii|viii|ix|x|xi|xii)$/;
 export const PHASES = { before: 'Trước giải', during: 'Trong giải', after: 'Sau giải' };
-export const TASK_STATUS = { todo: 'Chưa làm', doing: 'Đang làm', blocked: 'Vướng', done: 'Xong' };
+export const TASK_STATUS = { todo: 'Chưa làm', doing: 'Đang làm', waiting: 'Chờ KH', blocked: 'Vướng', done: 'Xong' };
 
 // ---------------------------------------------------------------------------
 // 1. Đọc báo giá
